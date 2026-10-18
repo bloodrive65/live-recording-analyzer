@@ -17,11 +17,20 @@
 <button class="menu-btn" aria-label="Menu" aria-expanded="false" aria-controls="nav">&#9776;</button>
 <nav class="nav" id="nav" aria-label="Main"><a href="index.html">Home</a><a href="getting-started.html">Getting started</a><a href="using-the-app.html">Using the app</a><a href="problems-explained.html">Problems explained</a><a href="faq.html">FAQ & fixes</a><a href="releases.html" aria-current=page>Releases</a></nav>
 </div></header>
-<main id="main"><div class="wrap page"><aside class="toc" aria-label="On this page"><b>ON THIS PAGE</b><a href="#v120">1.2.0</a><a href="#v110">1.1.0</a><a href="#which">Which file?</a></aside><article class="doc">
+<main id="main"><div class="wrap page"><aside class="toc" aria-label="On this page"><b>ON THIS PAGE</b><a href="#v121">1.2.1</a><a href="#v120">1.2.0</a><a href="#v110">1.1.0</a><a href="#which">Which file?</a></aside><article class="doc">
 <h1>Releases</h1>
 <p class="intro">Always get the newest version from <a href="https://github.com/bloodrive65/live-recording-analyzer/releases/latest">the latest release on GitHub</a>. Installers are built automatically from the public source code.</p>
 
-<div class="rel" id="v120"><header><h2>1.2.0</h2><span class="pill" style="color:var(--ok)">LATEST</span><span class="date">October 2026</span></header>
+<div class="rel" id="v121"><header><h2>1.2.1</h2><span class="pill" style="color:var(--ok)">LATEST</span><span class="date">October 2026</span></header>
+<ul>
+<li><b>Fixed:</b> the app could close by itself right when the automatic analysis finished after a recording. Any future error is saved to <b>crash.log</b> in Documents\Live Recording Analyzer, and the app tells you about it the next time it opens.</li>
+<li><b>Settings changes are noticed:</b> while watching, if you change something in OBS (for example the encoder Preset), the Advisor lists what changed, what it should do, and when it takes effect.</li>
+<li><b>Before/after comparison:</b> after each analyzed recording, the Advisor compares encoding skips and rendering lag with your previous recording and says whether the change helped.</li>
+<li>A busy video encoder (100%) with no skipped frames is now a quiet note instead of a warning. It only becomes a warning when frames are actually skipped.</li>
+</ul>
+<div class="dl"><a class="btn primary" href="https://github.com/bloodrive65/live-recording-analyzer/releases/tag/v1.2.1">Download 1.2.1</a></div></div>
+
+<div class="rel" id="v120"><header><h2>1.2.0</h2><span class="date">October 2026</span></header>
 <p>New name: <b>Live Recording Analyzer</b> (previously “OBS Session Analyzer”), with a new icon.</p>
 <ul>
 <li><b>Guided setup:</b> on first launch the app asks whether you'd like help, with a “Remember my choice” option. It checks OBS, the WebSocket connection, the recording drive, the GPU and HDR on <em>this</em> PC.</li>
@@ -31,7 +40,7 @@
 <li><b>Lighter:</b> new Light resource mode, the app's own CPU and memory shown in the status bar, and lower-priority analysis and deep scans.</li>
 <li>Port arrows on the Settings tab are now easy to see.</li>
 </ul>
-<div class="dl"><a class="btn primary" href="https://github.com/bloodrive65/live-recording-analyzer/releases/tag/v1.2.0">Download 1.2.0</a></div></div>
+<div class="dl"><a class="btn" href="https://github.com/bloodrive65/live-recording-analyzer/releases/tag/v1.2.0">Download 1.2.0</a></div></div>
 
 <div class="rel" id="v110"><header><h2>1.1.0</h2><span class="date">October 2026</span></header>
 <p>First public version, released as “OBS Session Analyzer.”</p>

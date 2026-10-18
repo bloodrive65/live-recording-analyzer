@@ -29,7 +29,7 @@ from analyzer.analyze import fmt_t
 
 APP_NAME = "Live Recording Analyzer"
 OLD_NAME = "OBS Session Analyzer"
-VERSION = "1.2.0"
+VERSION = "1.2.1"
 
 
 def resource(name):
@@ -53,6 +53,8 @@ def docs_dir(name=None):
 
 
 DATA = docs_dir()
+CRASH_LOG = os.path.join(DATA, "crash.log")
+RUN_FLAG = os.path.join(DATA, ".running")
 # Upgrading from 1.1 (OBS Session Analyzer): move the old data folder so sessions, reports and settings carry over.
 try:
     _old = docs_dir(OLD_NAME)
@@ -997,10 +999,75 @@ class Main(QMainWindow):
         self._live_job = True
         self._start_worker(log_path, {idx: vid} if vid else {}, mon if mon and os.path.isfile(mon) else None, deep, [idx])
 
+    def _record_history(self, res):
+        """Remember each analyzed recording's settings and skip counts, so the next one can be compared."""
+        try:
+            rec = res.recordings[-1].output
+        except Exception:
+            return None, None
+        e = rec.encoder or {}
+        dur = rec.duration_seconds - rec.paused_seconds
+        entry = {"when": rec.start.isoformat(), "path": rec.path, "dur": dur,
+                 "frames": rec.frames_output or rec.encode_total or 0,
+                 "enc_skip": rec.encode_skipped or 0, "render_lag": rec.render_lagged or 0,
+                 "settings": {k: str(v) for k, v in e.items() if k in ("codec", "rate_control", "cqp", "cq", "bitrate", "preset", "preset2",
+                                                                      "tuning", "multipass", "profile", "width", "height", "lookahead", "encoder")}}
+        hist_path = os.path.join(DATA, "history.jsonl")
+        prev = None
+        try:
+            with open(hist_path, "r", encoding="utf-8") as f:
+                rows = [json.loads(x) for x in f if x.strip()]
+            rows = [x for x in rows if x.get("when") != entry["when"]]
+            prev = rows[-1] if rows else None
+        except Exception:
+            rows = []
+        try:
+            with open(hist_path, "a", encoding="utf-8") as f:
+                if not any(x.get("when") == entry["when"] for x in rows):
+                    f.write(json.dumps(entry) + "\n")
+        except Exception:
+            pass
+        return entry, prev
+
+    @staticmethod
+    def _compare(cur, prev):
+        if not cur or not prev or not prev.get("frames") or not cur.get("frames"):
+            return None
+        names = {"preset": "Preset", "preset2": "Preset", "rate_control": "Rate control", "cqp": "CQP", "cq": "CQ", "bitrate": "Bitrate",
+                 "multipass": "Multipass", "lookahead": "Look-ahead", "profile": "Profile", "codec": "Codec", "tuning": "Tuning"}
+        a, b = prev.get("settings", {}), cur.get("settings", {})
+        changed = [f"{names.get(k, k)}: {a.get(k, '—')} → {b.get(k, '—')}" for k in names if a.get(k) != b.get(k) and (a.get(k) or b.get(k))]
+        w, h = (b.get("width"), b.get("height")), (a.get("width"), a.get("height"))
+        if w != h and all(w) and all(h):
+            changed.append(f"Resolution: {h[0]}x{h[1]} → {w[0]}x{w[1]}")
+        pe = 100 * prev["enc_skip"] / prev["frames"]
+        ce = 100 * cur["enc_skip"] / cur["frames"]
+        pr = 100 * prev["render_lag"] / max(prev["frames"], 1)
+        cr = 100 * cur["render_lag"] / max(cur["frames"], 1)
+        lines = [f"Encoding skips: {prev['enc_skip']:,} ({pe:.2f}%) → {cur['enc_skip']:,} ({ce:.2f}%)",
+                 f"Rendering lag: {prev['render_lag']:,} ({pr:.2f}%) → {cur['render_lag']:,} ({cr:.2f}%)"]
+        if changed:
+            if ce + 0.01 < pe:
+                verdict = "The change helped: fewer encoding skips than last time."
+            elif ce > pe + 0.01:
+                verdict = "More encoding skips than last time, so the change didn’t help on its own."
+            else:
+                verdict = "No real difference in encoding skips." + (" Both recordings were clean." if ce == 0 and pe == 0 else "")
+            if cur.get("dur", 0) < 600 or prev.get("dur", 0) < 600:
+                verdict += " (One recording was under 10 minutes, so take this with a grain of salt.)"
+        else:
+            verdict = "Same encoder settings as your previous recording."
+        return verdict, (["Changed: " + "; ".join(changed)] if changed else []) + lines
+
     def _post_analysis(self, res, path):
         bad = [f for f in res.findings if f.severity in ("critical", "warning")]
         sev = "critical" if any(f.severity == "critical" for f in bad) else ("warning" if bad else "good")
         steps = [f"{f.title}" + (f" — {f.fix}" if f.fix else "") for f in bad[:6]]
+        cur, prev = self._record_history(res)
+        cmp_ = self._compare(cur, prev)
+        if cmp_:
+            self.post_local(Advice(f"compare-{time.time():.0f}", "status", "after", "Compared with your previous recording: " + cmp_[0],
+                                   f"Previous recording: {os.path.basename(prev.get('path') or '') or prev.get('when', '')[:16]}", steps=cmp_[1]))
         self._dismiss("analysis-run")
         self.post_local(Advice("analysis-done", sev, "after",
                                "Report ready — " + (f"{len(bad)} thing(s) to look at" if bad else "no problems found"),
@@ -1542,6 +1609,10 @@ class Main(QMainWindow):
 
     def _start_worker(self, log, vids, mon, deep, sel):
         self.worker = AnalyzeWorker(log, vids, mon, deep, sel)
+        if not hasattr(self, "_threads"):
+            self._threads = set()
+        self._threads.add(self.worker)
+        self.worker.finished.connect(lambda w=self.worker: self._threads.discard(w))
         self.worker.progress.connect(self._prog)
         self.worker.done.connect(self._done)
         self.worker.failed.connect(self._failed)
@@ -1772,9 +1843,38 @@ def selftest(out):
     os._exit(code)
 
 
+def install_crash_log():
+    """Write any error to Documents\\Live Recording Analyzer\\crash.log instead of closing silently."""
+    import faulthandler
+    try:
+        os.makedirs(DATA, exist_ok=True)
+        f = open(CRASH_LOG, "a", encoding="utf-8")
+        f.write(f"\n===== {APP_NAME} {VERSION} started {datetime.now():%Y-%m-%d %H:%M:%S} =====\n")
+        f.flush()
+        faulthandler.enable(f)            # hard crashes (native) end up here too
+    except Exception:
+        return
+
+    def hook(et, ev, tb):
+        try:
+            f.write(f"[{datetime.now():%H:%M:%S}] " + "".join(traceback.format_exception(et, ev, tb)))
+            f.flush()
+        except Exception:
+            pass
+    sys.excepthook = hook                  # keep running after an error in the window code
+    threading.excepthook = lambda a: hook(a.exc_type, a.exc_value, a.exc_traceback)
+    install_crash_log.file = f
+
+
 def main():
     if "--selftest" in sys.argv:
         selftest(sys.argv[sys.argv.index("--selftest") + 1])
+    crashed_last_time = os.path.exists(RUN_FLAG)
+    install_crash_log()
+    try:
+        open(RUN_FLAG, "w").close()
+    except Exception:
+        pass
     if sys.platform == "win32":
         try:
             import ctypes
@@ -1802,11 +1902,22 @@ def main():
     app.setStyleSheet(app_style())
     app.setQuitOnLastWindowClosed(False)
     w = Main()
+    if crashed_last_time:
+        w.post_local(Advice("crashed", "warning", "before", "The app closed unexpectedly last time",
+                            "Sorry about that. Details were saved to a crash log. If it happens again, please attach this file when you report it — "
+                            "it shows exactly what went wrong.",
+                            steps=[CRASH_LOG],
+                            actions=[("Open crash log", "open_report", CRASH_LOG), ("Open data folder", "open_report", DATA)]))
     if "--minimized" in sys.argv and QSystemTrayIcon.isSystemTrayAvailable():
         w.tray.showMessage(APP_NAME, "Running in the tray. Click the icon to open.", QSystemTrayIcon.Information, 3000)
     else:
         w.show()
-    sys.exit(app.exec())
+    code = app.exec()
+    try:
+        os.remove(RUN_FLAG)               # clean exit
+    except Exception:
+        pass
+    sys.exit(code)
 
 
 if __name__ == "__main__":

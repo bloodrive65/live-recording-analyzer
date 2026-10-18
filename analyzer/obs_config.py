@@ -60,6 +60,31 @@ class ObsConfig:
     websocket: dict = field(default_factory=dict)
     rec_uses_stream_encoder: bool = False
 
+    def snapshot(self) -> dict:
+        """The settings people change to fix problems, with OBS's own wording. Used to spot changes."""
+        es = self.encoder_settings or {}
+        preset = str(es.get("preset2") or es.get("preset") or "").lower()
+        rc = str(es.get("rate_control") or "")
+        level = es.get("cqp") or es.get("cq") or es.get("crf") or es.get("qp") or ""
+        snap = {
+            "Video encoder": self.rec_encoder or "",
+            "Preset": PRESET_LABELS.get(preset, preset.upper() if preset else ""),
+            "Rate control": rc,
+            "Quality level (CQ/CQP)": str(level) if level != "" else "",
+            "Bitrate": f"{es['bitrate']} Kbps" if es.get("bitrate") and rc.upper() in ("CBR", "VBR") else "",
+            "Multipass mode": str(es.get("multipass") or ""),
+            "Look-ahead": ("on" if es.get("lookahead") else "off") if "lookahead" in es else "",
+            "Profile": str(es.get("profile") or ""),
+            "Output resolution": self.output_res,
+            "FPS": self.fps_label or (f"{self.fps:g}" if self.fps else ""),
+            "Color format": self.color_format,
+            "Color space": self.color_space,
+            "Color range": self.color_range,
+            "Recording format": self.rec_format,
+            "Recording path": self.rec_path,
+        }
+        return {k: v for k, v in snap.items() if v not in ("", None)}
+
     @property
     def advanced(self):
         return (self.output_mode or "").lower() == "advanced"
@@ -199,6 +224,36 @@ def load() -> ObsConfig:
             pass
     cfg.websocket = websocket_settings(base)
     return cfg
+
+
+PRESET_LABELS = {
+    "p1": "P1: Fastest", "p2": "P2: Faster", "p3": "P3: Fast", "p4": "P4: Medium",
+    "p5": "P5: Slow", "p6": "P6: Slower", "p7": "P7: Slowest",
+}
+
+
+def settings_files(base: str = "") -> list:
+    """Files OBS rewrites when you click Apply/OK in Settings (current profile and scene collection)."""
+    base = base or obs_dir()
+    out = [os.path.join(base, "global.ini"), os.path.join(base, "user.ini")]
+    try:
+        prof = os.path.join(base, "basic", "profiles")
+        for d in os.listdir(prof):
+            for f in ("basic.ini", "recordEncoder.json", "streamEncoder.json"):
+                out.append(os.path.join(prof, d, f))
+    except OSError:
+        pass
+    return out
+
+
+def settings_stamp(base: str = "") -> tuple:
+    st = []
+    for f in settings_files(base):
+        try:
+            st.append((f, os.path.getmtime(f)))
+        except OSError:
+            pass
+    return tuple(st)
 
 
 def websocket_settings(base: str = "") -> dict:

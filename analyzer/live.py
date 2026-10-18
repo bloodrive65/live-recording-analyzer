@@ -89,6 +89,10 @@ class LiveAdvisor:
         self.bytes_stall_since = None
         self.target_fps = 0
         self._now = time.time()
+        self._stamp = None
+        self._stamp_t = 0
+        self._snap = {}
+        self.changes = []          # [(time, {setting: (old, new)})] this session
 
     # ------------------------------------------------------------------ plumbing
     def post(self, a: Advice, cooldown: float = 0):
@@ -139,6 +143,8 @@ class LiveAdvisor:
         if announce:
             for a in reversed(items):   # the app shows newest first; keep the summary on top
                 self.post(a)
+        self._snap = cfg.snapshot() if cfg.found else {}
+        self._stamp = obs_config.settings_stamp()
         if cfg.rec_path:
             self.drive = drive_info(cfg.rec_path)
         self.target_fps = cfg.fps or (log.video_settings[-1].fps_value if log and log.video_settings else 0)
@@ -164,9 +170,49 @@ class LiveAdvisor:
                 if time.time() - last_log_check > 2:
                     last_log_check = time.time()
                     self._tail_log()
+                every = 20 if getattr(self.monitor, "light", False) else 8
+                if time.time() - self._stamp_t > every:
+                    self._stamp_t = time.time()
+                    self._check_settings_changed()
             except Exception as e:  # never die
                 self.post(Advice("live-error", "warning", "during", "Live advisor hit an error (still running)", repr(e)), cooldown=300)
             self.stop_evt.wait(1.0)
+
+    # ------------------------------------------------------------------ OBS settings changed?
+    def _check_settings_changed(self):
+        stamp = obs_config.settings_stamp()
+        if self._stamp is None or stamp == self._stamp:
+            self._stamp = stamp
+            return
+        self._stamp = stamp
+        cfg = obs_config.load()
+        if not cfg.found:
+            return
+        new = cfg.snapshot()
+        diff = {k: (self._snap.get(k, "—"), v) for k, v in new.items() if self._snap.get(k) != v}
+        diff.update({k: (v, "—") for k, v in self._snap.items() if k not in new})
+        self._snap = new
+        if not diff:
+            return
+        self.changes.append((datetime.now(), diff))
+        if not self.recording:
+            self.cfg = cfg
+            self.target_fps = cfg.fps or self.target_fps
+            if cfg.rec_path:
+                self.drive = drive_info(cfg.rec_path)
+        lines = [f"{k}: {a} → {b}" for k, (a, b) in diff.items()]
+        when = ("A recording is running, so it keeps using the old settings. They take effect when you start the next recording."
+                if self.recording else "These apply to your next recording.")
+        effect = change_effects(diff)
+        self.post(Advice(f"cfg-change-{time.time():.0f}", "status", "during" if self.recording else "before",
+                         "OBS settings changed", when + (" " + effect if effect else "") +
+                         " After that recording, the report compares it with the previous one so you can see whether the change helped.",
+                         steps=lines))
+        if not self.recording:
+            # re-check only the new settings, quietly: post anything that is now a real problem
+            for a in preflight_rules(cfg, self.log_obj):
+                if a.severity in ("critical", "warning") and a.key not in ("pf-summary",):
+                    self.post(a, cooldown=600)
 
     # ------------------------------------------------------------------ log tail
     def _open_log(self, seek_end=False):
@@ -316,10 +362,17 @@ class LiveAdvisor:
         # ---- early warnings (before skips happen)
         enc = max([v for v in (m.get("gpu_enc"), m.get("nv_enc")) if isinstance(v, (int, float))] or [0])
         if self._sustained("enc", enc >= 95, 8):
-            self.post(Advice("warn-enc", "warning", "during", f"Video encoder is at its limit ({enc:.0f}%)",
-                             "Skipped frames are likely if this continues.",
-                             steps=recommend("encode", "encoder", self.cfg, m, self.drive), actions=[("Pause recording", "pause", None)],
-                             video_t=self._vt()), cooldown=300)
+            if self.rec_skips["encode"]:
+                self.post(Advice("warn-enc", "warning", "during", f"Video encoder is at its limit ({enc:.0f}%) and frames are being skipped",
+                                 f"{self.rec_skips['encode']:,} frame(s) skipped so far in this recording.",
+                                 steps=recommend("encode", "encoder", self.cfg, m, self.drive), actions=[("Pause recording", "pause", None)],
+                                 video_t=self._vt()), cooldown=300)
+            else:
+                self.post(Advice("note-enc", "tip", "during", f"Video encoder is busy ({enc:.0f}%), no skipped frames so far",
+                                 "A busy encoder on its own is fine — what matters is skipped frames. If any happen, you’ll get an alert "
+                                 "with what to change. Nothing to do right now.",
+                                 steps=["If skips do start, these are the settings to lighten:"] + recommend("encode", "encoder", self.cfg, m, self.drive),
+                                 video_t=self._vt()), cooldown=900)
         g3 = m.get("gpu_3d") or 0
         if self._sustained("g3", g3 >= 97, 8):
             self.post(Advice("warn-g3", "warning", "during", f"GPU is maxed out ({g3:.0f}% 3D load)",
@@ -496,6 +549,27 @@ def recommend(kind, ckey, cfg, m, drive) -> list:
     else:
         steps.append("No clear cause yet — keep playing. The after-recording report will check the file and the full timeline.")
     return steps
+
+
+def change_effects(diff: dict) -> str:
+    """What a settings change is expected to do, in plain words."""
+    out = []
+    order = ["p1", "p2", "p3", "p4", "p5", "p6", "p7"]
+    if "Preset" in diff:
+        a, b = (str(x).split(":")[0].lower() for x in diff["Preset"])
+        if a in order and b in order:
+            if order.index(b) < order.index(a):
+                out.append("A faster preset gives the video encoder less work per frame, which lowers the chance of encoding skips "
+                           "(at a slightly lower quality for the same file size).")
+            elif order.index(b) > order.index(a):
+                out.append("A slower preset gives the encoder more work per frame — better quality, but more risk of encoding skips.")
+    if "Multipass mode" in diff:
+        out.append("Multipass changes how much work the encoder does per frame (Single pass is the lightest).")
+    if "Look-ahead" in diff:
+        out.append("Look-ahead adds encoder work; turning it off makes encoding lighter.")
+    if "Output resolution" in diff or "FPS" in diff:
+        out.append("Resolution and frame rate have the biggest effect on encoder and GPU load.")
+    return " ".join(out)
 
 
 def audio_rate_fix(dev, obs_rate: int) -> list:

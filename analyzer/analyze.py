@@ -496,7 +496,7 @@ def _recording_findings(log, r: RecordingResult, F: list):
             add("warning", "Color", "Color range is set to Full",
                 f"OBS color settings: {vs.yuv_mode}.",
                 "Most players, editors and YouTube expect Limited range video. Full-range files are often shown with crushed blacks/blown highlights or look washed out, depending on the app.",
-                "Settings → Advanced → Color Range → Limited (unless you know your whole editing chain handles Full).")
+                "OBS → Settings → Advanced → Video → Color Range → Limited (unless you know your whole editing chain handles Full).")
 
     # --- capture devices
     canvas_fps = vs.fps_value if vs else 0
