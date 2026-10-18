@@ -15,24 +15,71 @@ except ImportError:  # pragma: no cover
 
 
 def obs_ws_config() -> dict:
-    """Read OBS's own WebSocket settings so the user doesn't have to type them."""
-    appdata = os.environ.get("APPDATA", "")
-    candidates = [
-        os.path.join(appdata, "obs-studio", "plugin_config", "obs-websocket", "config.json"),
-    ]
-    for c in candidates:
-        try:
-            with open(c, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            return {
-                "enabled": bool(data.get("server_enabled", False)),
-                "port": int(data.get("server_port", 4455)),
-                "password": data.get("server_password", "") if data.get("auth_required", True) else "",
-                "found": True,
-            }
-        except Exception:
-            continue
-    return {"enabled": False, "port": 4455, "password": "", "found": False}
+    """Read OBS's own WebSocket settings (fresh from disk) so the user doesn't have to type them."""
+    from .obs_config import websocket_settings
+    data = websocket_settings()
+    if not data:
+        return {"enabled": False, "port": 4455, "password": "", "found": False, "source": ""}
+    try:
+        port = int(data.get("server_port", 4455))
+    except (TypeError, ValueError):
+        port = 4455
+    return {"enabled": bool(data.get("server_enabled", False)), "port": port,
+            "password": data.get("server_password", "") if data.get("auth_required", True) else "",
+            "found": True, "source": data.get("_source", "")}
+
+
+def obs_running() -> bool:
+    try:
+        import psutil
+        for p in psutil.process_iter(["name"]):
+            n = (p.info.get("name") or "").lower()
+            if n in ("obs64.exe", "obs32.exe", "obs.exe", "obs"):
+                return True
+    except Exception:
+        pass
+    return False
+
+
+def connection_status(port: int, password: str, host: str = "127.0.0.1") -> dict:
+    """Work out, in plain terms, whether the app can talk to OBS right now.
+
+    state: connected | obs_closed | ws_off | auth | port | error
+    """
+    import socket
+    cfg = obs_ws_config()
+    running = obs_running()
+    open_ = False
+    try:
+        with socket.create_connection((host, port), timeout=0.6):
+            open_ = True
+    except OSError:
+        open_ = False
+    if not open_:
+        if not running:
+            return {"state": "obs_closed", "label": "OBS isn't running",
+                    "detail": "Open OBS. The app connects automatically within a few seconds.", "cfg": cfg}
+        if cfg["found"] and not cfg["enabled"]:
+            return {"state": "ws_off", "label": "WebSocket is turned off in OBS",
+                    "detail": "In OBS: Tools → WebSocket Server Settings → tick “Enable WebSocket server” → OK.", "cfg": cfg}
+        if cfg["found"] and cfg["port"] != port:
+            return {"state": "port", "label": f"OBS uses port {cfg['port']}, not {port}",
+                    "detail": f"Change the port here to {cfg['port']}.", "cfg": cfg}
+        return {"state": "ws_off", "label": "OBS is running but not accepting connections",
+                "detail": "In OBS: Tools → WebSocket Server Settings → make sure “Enable WebSocket server” is ticked, then click OK. "
+                          "If you just ticked it, click OK (not only Apply).", "cfg": cfg}
+    try:
+        c = ObsClient(host, port, password, timeout=2.5)
+        c.connect()
+        v = c.request("GetVersion")
+        c.close()
+        return {"state": "connected", "label": f"Connected to OBS {v.get('obsVersion', '')}".strip(),
+                "detail": "Live skip tracking and the Pause/Resume buttons are available.", "cfg": cfg, "version": v.get("obsVersion", "")}
+    except PermissionError:
+        return {"state": "auth", "label": "OBS rejected the password",
+                "detail": "In OBS: Tools → WebSocket Server Settings → Show Connect Info → copy the password and paste it here.", "cfg": cfg}
+    except Exception as e:
+        return {"state": "error", "label": "Couldn’t talk to OBS", "detail": str(e)[:160], "cfg": cfg}
 
 
 class ObsClient:

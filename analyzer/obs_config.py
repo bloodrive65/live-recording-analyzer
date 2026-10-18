@@ -1,6 +1,6 @@
 """Read OBS's current profile + scene collection straight from disk.
 
-Works even when OBS is closed, so the pre-flight check can run before you start.
+Works even when OBS is closed, so the OBS settings check can run before you start.
 """
 from __future__ import annotations
 
@@ -58,6 +58,27 @@ class ObsConfig:
     screen_captures: list = field(default_factory=list)   # dicts
     browser_sources: int = 0
     websocket: dict = field(default_factory=dict)
+    rec_uses_stream_encoder: bool = False
+
+    @property
+    def advanced(self):
+        return (self.output_mode or "").lower() == "advanced"
+
+    def enc_path(self, option: str) -> str:
+        """Where an encoder option lives in OBS for *this* user's output mode."""
+        if self.advanced:
+            tab = "Streaming" if self.rec_uses_stream_encoder else "Recording"
+            return f"OBS → Settings → Output → {tab} tab → {option}"
+        return (f"OBS → Settings → Output → set Output Mode (at the top) to Advanced → Recording tab → {option}. "
+                f"Simple mode doesn’t show this option")
+
+    def rec_path_setting(self) -> str:
+        return ("OBS → Settings → Output → Recording tab → Recording Path" if self.advanced
+                else "OBS → Settings → Output → Recording → Recording Path")
+
+    def rec_format_setting(self) -> str:
+        return ("OBS → Settings → Output → Recording tab → Recording Format" if self.advanced
+                else "OBS → Settings → Output → Recording → Recording Format")
 
     @property
     def range_label(self):
@@ -116,6 +137,7 @@ def load() -> ObsConfig:
         cfg.rec_rescale_res = _get(cp, "AdvOut", "RecRescaleRes")
         enc_file = "recordEncoder.json" if cfg.rec_encoder.lower() not in ("none", "") else "streamEncoder.json"
         if cfg.rec_encoder.lower() in ("none", ""):
+            cfg.rec_uses_stream_encoder = True
             cfg.rec_encoder = _get(cp, "AdvOut", "Encoder", "") + " (same as stream)"
     else:
         cfg.rec_path = _get(cp, "SimpleOutput", "FilePath")
@@ -175,10 +197,29 @@ def load() -> ObsConfig:
                     cfg.browser_sources += 1
         except Exception:
             pass
-    # websocket
-    try:
-        with open(os.path.join(base, "plugin_config", "obs-websocket", "config.json"), "r", encoding="utf-8") as f:
-            cfg.websocket = json.load(f)
-    except Exception:
-        cfg.websocket = {}
+    cfg.websocket = websocket_settings(base)
     return cfg
+
+
+def websocket_settings(base: str = "") -> dict:
+    """OBS 30+ keeps WebSocket settings in plugin_config/obs-websocket/config.json;
+    OBS 28-29 kept them in global.ini under [OBSWebSocket]. Read fresh every time."""
+    base = base or obs_dir()
+    try:
+        with open(os.path.join(base, "plugin_config", "obs-websocket", "config.json"), "r", encoding="utf-8-sig") as f:
+            d = json.load(f)
+            d["_source"] = "config.json"
+            return d
+    except Exception:
+        pass
+    cp = _ini(os.path.join(base, "global.ini"))
+    if cp.has_section("OBSWebSocket"):
+        b = lambda k, dflt: str(_get(cp, "OBSWebSocket", k, dflt)).lower() in ("true", "1")
+        try:
+            port = int(_get(cp, "OBSWebSocket", "ServerPort", "4455") or 4455)
+        except ValueError:
+            port = 4455
+        return {"server_enabled": b("ServerEnabled", "false"), "server_port": port,
+                "auth_required": b("AuthRequired", "true"), "server_password": _get(cp, "OBSWebSocket", "ServerPassword", ""),
+                "_source": "global.ini"}
+    return {}

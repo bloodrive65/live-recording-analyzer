@@ -7,7 +7,8 @@ import sys
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone, timedelta
 
-CREATE_NO_WINDOW = 0x08000000 if sys.platform == "win32" else 0
+# no console window + below-normal priority, so helper programs never compete with the game or OBS
+CREATE_NO_WINDOW = (0x08000000 | 0x00004000) if sys.platform == "win32" else 0
 
 # (provider substring, event id or None) -> plain-English meaning
 KNOWN = [

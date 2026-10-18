@@ -150,8 +150,8 @@ def build(res: Result) -> str:
         vcls, vtxt = "good", "<b>Clean session.</b> No skipped frames or setting conflicts were found."
 
     out = [f"<!doctype html><html lang='en'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>"
-           f"<title>OBS Session Report — {res.created:%Y-%m-%d %H:%M}</title><style>{CSS}</style></head><body><div class='wrap'>"]
-    out.append(f"<h1>OBS Session Report</h1><div class='muted'>Created {res.created:%A, %B %d %Y at %I:%M %p}</div>")
+           f"<title>Recording Report — {res.created:%Y-%m-%d %H:%M}</title><style>{CSS}</style></head><body><div class='wrap'>"]
+    out.append(f"<h1>Recording Report</h1><div class='muted'>Created {res.created:%A, %B %d %Y at %I:%M %p}</div>")
     src = []
     if log:
         src.append(f"OBS log: {E(os.path.basename(log.path))} ({E(log.obs_version)})")
@@ -312,7 +312,7 @@ def build(res: Result) -> str:
 <b>Missing frames in file</b> — gaps in the recording's frame timestamps. <b>Repeated frames</b> (deep scan) — the same picture shown twice in a row during motion, which is how most skips look in the finished video.</p>
 <p>Confidence badges: <span class='badge b-high'>high</span> strong evidence at that exact moment · <span class='badge b-medium'>medium</span> plausible contributor · <span class='badge b-low'>low</span> weak/indirect evidence.
 Possible reasons are educated guesses from what was measured — not proof.</p></div>""")
-    out.append(f"<footer>OBS Session Analyzer · report generated {res.created:%Y-%m-%d %H:%M:%S}</footer></div></body></html>")
+    out.append(f"<footer>Live Recording Analyzer · report generated {res.created:%Y-%m-%d %H:%M:%S}</footer></div></body></html>")
     return "".join(out)
 
 

@@ -23,7 +23,8 @@ import psutil
 from .obsws import ObsClient, obs_ws_config
 
 IS_WIN = sys.platform == "win32"
-CREATE_NO_WINDOW = 0x08000000 if IS_WIN else 0
+# no console window + below-normal priority, so helper programs never compete with the game or OBS
+CREATE_NO_WINDOW = (0x08000000 | 0x00004000) if IS_WIN else 0
 
 try:
     import win32pdh  # type: ignore
@@ -153,8 +154,14 @@ class NvidiaSmi:
 
 class Monitor:
     def __init__(self, out_dir: str, interval: float = 1.0, obs_host="127.0.0.1", obs_port: Optional[int] = None,
-                 obs_password: Optional[str] = None, use_obs=True):
+                 obs_password: Optional[str] = None, use_obs=True, light: bool = False):
         os.makedirs(out_dir, exist_ok=True)
+        # Light mode: sample every 2 s, look at other programs every 10 s, refresh GPU counter list less often
+        self.light = light
+        if light:
+            interval = max(interval, 2.0)
+        self.proc_every = 10.0 if light else 5.0
+        self.pdh_reexpand = 30.0 if light else 15.0
         self.out_dir = out_dir
         self.path = os.path.join(out_dir, "monitor.jsonl")
         self.interval = interval
@@ -275,7 +282,7 @@ class Monitor:
 
         # --- Windows performance counters
         if self.pdh:
-            vals = self.pdh.read()
+            vals = self.pdh.read(reexpand_every=self.pdh_reexpand)
             eng = defaultdict(float)
             per_pid_3d = defaultdict(float)
             per_pid_enc = defaultdict(float)
@@ -378,8 +385,8 @@ class Monitor:
         except Exception:
             pass
 
-        # --- top processes every 3 s
-        if time.time() - self._last_proc >= 3:
+        # --- busiest programs (every 5 s, or 10 s in Light mode)
+        if time.time() - self._last_proc >= self.proc_every:
             self._last_proc = time.time()
             s["procs"] = self._top_procs()
 

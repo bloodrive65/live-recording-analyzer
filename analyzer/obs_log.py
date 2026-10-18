@@ -47,6 +47,8 @@ class CaptureDevice:
     buffering: str = ""
     hw_decode: str = ""
     sample_rate: int = 0
+    uses_device_audio: Optional[bool] = None   # None = unknown
+    separate_audio: bool = False               # audio comes from a separate DirectShow audio device
     color_space: str = ""
     color_range: str = ""
 
@@ -137,6 +139,7 @@ class ObsLog:
     adapters: list = field(default_factory=list)
     displays: list = field(default_factory=list)
     audio_rate: int = 0
+    audio_buffering_sources: list = field(default_factory=list)
     video_settings: list = field(default_factory=list)
     devices: list = field(default_factory=list)
     screen_sources: list = field(default_factory=list)
@@ -357,6 +360,10 @@ def parse(path: str) -> ObsLog:
                     dev.buffering = v
                 elif k == "hardware decode":
                     dev.hw_decode = v
+                elif k == "separate audio filter":
+                    dev.separate_audio = True
+                elif k == "using video device audio":
+                    dev.uses_device_audio = v.strip().lower().startswith("y")
                 elif k == "sample rate":
                     try:
                         dev.sample_rate = int(v)
@@ -471,6 +478,9 @@ def parse(path: str) -> ObsLog:
         elif t.startswith("[obs-browser:") and "Error" in t:
             log.browser_errors += 1
 
+        mab = re.search(r"audio buffering.*\(source: (.*)\)", t)
+        if mab:
+            log.audio_buffering_sources.append(mab.group(1).strip())   # one entry per event
         for rx, cat, sev in WARN_PATTERNS:
             if rx.search(t):
                 log.events.append(LogEvent(L.ts, cat, sev, t.strip()))

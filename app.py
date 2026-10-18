@@ -1,4 +1,4 @@
-"""OBS Session Analyzer — desktop app."""
+"""Live Recording Analyzer — desktop app (formerly OBS Session Analyzer)."""
 from __future__ import annotations
 
 import json
@@ -17,17 +17,19 @@ from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QPushButton,
     QTabWidget, QComboBox, QFileDialog, QCheckBox, QLineEdit, QSpinBox, QProgressBar, QTreeWidget,
     QTreeWidgetItem, QMessageBox, QFrame, QSystemTrayIcon, QMenu, QListWidget, QListWidgetItem,
-    QTextBrowser, QSizePolicy, QHeaderView, QAbstractItemView, QScrollArea,
+    QTextBrowser, QSizePolicy, QHeaderView, QAbstractItemView, QScrollArea, QDialog, QStackedWidget,
 )
 
 from analyzer import obs_log, analyze, report
 from analyzer.monitor import Monitor
-from analyzer.obsws import ObsClient, obs_ws_config
+from analyzer.obsws import ObsClient, obs_ws_config, connection_status
+from analyzer import system_check
 from analyzer.live import LiveAdvisor, Advice
 from analyzer.analyze import fmt_t
 
-APP_NAME = "OBS Session Analyzer"
-VERSION = "1.1.0"
+APP_NAME = "Live Recording Analyzer"
+OLD_NAME = "OBS Session Analyzer"
+VERSION = "1.2.0"
 
 
 def resource(name):
@@ -35,7 +37,8 @@ def resource(name):
     return os.path.join(base, "assets", name)
 
 
-def docs_dir():
+def docs_dir(name=None):
+    name = name or APP_NAME
     if sys.platform == "win32":
         try:
             import ctypes
@@ -43,13 +46,20 @@ def docs_dir():
             buf = ctypes.create_unicode_buffer(wintypes.MAX_PATH)
             ctypes.windll.shell32.SHGetFolderPathW(None, 5, None, 0, buf)  # CSIDL_PERSONAL
             if buf.value:
-                return os.path.join(buf.value, APP_NAME)
+                return os.path.join(buf.value, name)
         except Exception:
             pass
-    return os.path.join(os.path.expanduser("~"), "Documents", APP_NAME)
+    return os.path.join(os.path.expanduser("~"), "Documents", name)
 
 
 DATA = docs_dir()
+# Upgrading from 1.1 (OBS Session Analyzer): move the old data folder so sessions, reports and settings carry over.
+try:
+    _old = docs_dir(OLD_NAME)
+    if os.path.isdir(_old) and not os.path.exists(DATA):
+        os.rename(_old, DATA)
+except Exception:
+    pass
 SESSIONS = os.path.join(DATA, "Sessions")
 REPORTS = os.path.join(DATA, "Reports")
 SETTINGS_FILE = os.path.join(DATA, "settings.json")
@@ -93,6 +103,17 @@ QPushButton#primary { background: #c23b3b; border: 1px solid #d64545; font-weigh
 QPushButton#primary:hover { background: #d64545; }
 QPushButton#stop { background: #3a3f4b; border: 1px solid #555c6b; font-weight: 700; font-size: 11pt; padding: 10px 22px; }
 QLineEdit, QComboBox, QSpinBox { background: #1d212a; border: 1px solid #343b49; border-radius: 6px; padding: 5px 8px; color: #e7e9ee; }
+QSpinBox { padding-right: 26px; min-height: 22px; }
+QSpinBox::up-button { subcontrol-origin: border; subcontrol-position: top right; width: 22px; background: #2e3545;
+    border-left: 1px solid #4a5263; border-bottom: 1px solid #4a5263; border-top-right-radius: 6px; }
+QSpinBox::down-button { subcontrol-origin: border; subcontrol-position: bottom right; width: 22px; background: #2e3545;
+    border-left: 1px solid #4a5263; border-bottom-right-radius: 6px; }
+QSpinBox::up-button:hover, QSpinBox::down-button:hover { background: #3d4659; }
+QSpinBox::up-button:pressed, QSpinBox::down-button:pressed { background: #c23b3b; }
+QSpinBox::up-arrow { image: url(UP_SVG); width: 10px; height: 10px; }
+QSpinBox::down-arrow { image: url(DOWN_SVG); width: 10px; height: 10px; }
+QLabel#pill { border-radius: 10px; padding: 3px 10px; font-weight: 600; font-size: 9pt; }
+QLabel#chip { border-radius: 9px; padding: 2px 9px; font-weight: 700; font-size: 8.5pt; }
 QComboBox QAbstractItemView { background: #1d212a; color: #e7e9ee; selection-background-color: #c23b3b; }
 QTreeWidget, QListWidget, QTextBrowser { background: #171a21; border: 1px solid #2a2f3a; border-radius: 8px; color: #e7e9ee; }
 QHeaderView::section { background: #1d212a; color: #9aa3b2; border: none; padding: 6px; font-weight: 600; }
@@ -119,7 +140,22 @@ QPushButton#link:hover { color: #c4d9ff; text-decoration: underline; }
 QPushButton#act { background: #2a2030; border: 1px solid #5a3a46; padding: 5px 12px; }
 QPushButton#act:hover { background: #3a2a3e; }
 QStatusBar { color: #9aa3b2; }
+QStatusBar QLabel { color: #9aa3b2; padding: 0 8px; }
 """
+
+
+def app_style():
+    f = lambda n: resource(n).replace("\\", "/")
+    return STYLE.replace("CHECK_SVG", f("check.svg")).replace("UP_SVG", f("up.svg")).replace("DOWN_SVG", f("down.svg"))
+
+
+PILL = {"ok": ("#12321f", "#3ecf8e"), "warn": ("#3a2f12", "#f5b748"), "bad": ("#3a1717", "#ff6b6b"), "idle": ("#23272f", "#9aa3b2")}
+
+
+def set_pill(lbl, kind, text):
+    bg, fg = PILL.get(kind, PILL["idle"])
+    lbl.setText(text)
+    lbl.setStyleSheet(f"background:{bg}; color:{fg};")
 
 
 def card():
@@ -290,6 +326,226 @@ class TestObsWorker(QThread):
             self.result.emit(False, "Couldn’t reach OBS. Is OBS open, and is Tools → WebSocket Server Settings → “Enable WebSocket server” ticked?")
 
 
+# ------------------------------------------------------------------------------ guided setup
+class SetupOffer(QDialog):
+    """First-run question: guided setup or not, with “Remember my choice”."""
+
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.setWindowTitle("Welcome to " + APP_NAME)
+        self.setMinimumWidth(500)
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(24, 22, 24, 18)
+        lay.setSpacing(12)
+        lay.addWidget(label("Would you like a guided setup?", "h1"))
+        lay.addWidget(label("The guided setup checks this PC — OBS, the connection to OBS, your recording drive, graphics card, "
+                            "Windows HDR and notifications — and walks you through anything that needs changing. It takes about a minute "
+                            "and never changes anything by itself.", "muted", True))
+        lay.addWidget(label("Prefer to set things up yourself? Skip it. You can start it any time from Settings → Run guided setup.", "muted", True))
+        self.remember = QCheckBox("Remember my choice")
+        lay.addWidget(self.remember)
+        row = QHBoxLayout()
+        row.addStretch(1)
+        no = QPushButton("No, I’ll set it up myself")
+        no.clicked.connect(self.reject)
+        yes = QPushButton("Yes, guide me")
+        yes.setObjectName("primary")
+        yes.setDefault(True)
+        yes.clicked.connect(self.accept)
+        row.addWidget(no)
+        row.addWidget(yes)
+        lay.addLayout(row)
+
+
+STATE_CHIP = {"ok": ("ok", "OK"), "attention": ("warn", "Needs attention"), "unknown": ("idle", "Can’t check yet")}
+
+
+class CheckCard(QFrame):
+    def __init__(self, c):
+        super().__init__()
+        self.setObjectName("card")
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(14, 10, 14, 10)
+        lay.setSpacing(6)
+        top = QHBoxLayout()
+        top.addWidget(label(c["title"], "advT"))
+        chip = QLabel()
+        chip.setObjectName("chip")
+        kind, text = STATE_CHIP.get(c["state"], STATE_CHIP["unknown"])
+        set_pill(chip, kind, text)
+        top.addWidget(chip)
+        top.addStretch(1)
+        act = c.get("action")
+        if act:
+            b = QPushButton(act[0])
+            b.setObjectName("link")
+            target = act[1][4:] if act[1].startswith("url:") else act[1]
+            b.clicked.connect(lambda _=False, t=target: QDesktopServices.openUrl(QUrl(t)))
+            top.addWidget(b)
+        lay.addLayout(top)
+        lay.addWidget(label(c["summary"], "muted", True))
+        if c.get("steps"):
+            st = label("\n".join(("• " if len(c["steps"]) > 1 else "") + x for x in c["steps"]), "steps", True)
+            st.setTextInteractionFlags(Qt.TextSelectableByMouse)
+            lay.addWidget(st)
+
+
+class SetupWizard(QDialog):
+    """Step-by-step setup based on what is actually on this PC."""
+
+    def __init__(self, main):
+        super().__init__(main)
+        self.main = main
+        self.completed = False
+        self.setWindowTitle(APP_NAME + " — guided setup")
+        self.resize(760, 640)
+        self.setAttribute(Qt.WA_DeleteOnClose)
+        root = QVBoxLayout(self)
+        root.setContentsMargins(22, 18, 22, 16)
+        root.setSpacing(10)
+        self.step_lbl = label("", "muted")
+        root.addWidget(self.step_lbl)
+        self.stack = QStackedWidget()
+        root.addWidget(self.stack, 1)
+
+        # page 1: intro
+        p1 = QWidget()
+        l1 = QVBoxLayout(p1)
+        l1.setContentsMargins(0, 0, 0, 0)
+        l1.addWidget(label("Let’s check this PC", "h1"))
+        l1.addWidget(label("The next step looks at what’s installed and how it’s set up. Each item shows <b>OK</b>, <b>Needs attention</b> "
+                           "(with the exact steps for your setup) or <b>Can’t check yet</b> (usually because OBS isn’t open).", "muted", True))
+        l1.addWidget(label("Before you start: open OBS Studio if it’s installed. It lets more checks run.", "muted", True))
+        l1.addStretch(1)
+        self.stack.addWidget(p1)
+
+        # page 2: checks
+        p2 = QWidget()
+        l2 = QVBoxLayout(p2)
+        l2.setContentsMargins(0, 0, 0, 0)
+        hdr = QHBoxLayout()
+        hdr.addWidget(label("What this PC has", "h1"))
+        hdr.addStretch(1)
+        self.again = QPushButton("Check again")
+        self.again.clicked.connect(self.run_checks)
+        hdr.addWidget(self.again)
+        l2.addLayout(hdr)
+        self.check_status = label("", "muted", True)
+        l2.addWidget(self.check_status)
+        self.prog = QProgressBar()
+        self.prog.setRange(0, 0)
+        self.prog.setFixedHeight(6)
+        self.prog.setTextVisible(False)
+        l2.addWidget(self.prog)
+        sa = QScrollArea()
+        sa.setWidgetResizable(True)
+        sa.setObjectName("feed")
+        inner = QWidget()
+        inner.setObjectName("feedInner")
+        self.checks_lay = QVBoxLayout(inner)
+        self.checks_lay.setContentsMargins(0, 0, 6, 0)
+        self.checks_lay.setSpacing(8)
+        self.checks_lay.addStretch(1)
+        sa.setWidget(inner)
+        l2.addWidget(sa, 1)
+        self.stack.addWidget(p2)
+
+        # page 3: alerts and finish
+        p3 = QWidget()
+        l3 = QVBoxLayout(p3)
+        l3.setContentsMargins(0, 0, 0, 0)
+        l3.setSpacing(10)
+        l3.addWidget(label("How should the app reach you while you play?", "h1"))
+        l3.addWidget(label("Alerts appear as Windows pop-ups in the corner of the screen, so you don’t have to look at the app.", "muted", True))
+        g = QGridLayout()
+        g.addWidget(label("Windows pop-ups"), 0, 0)
+        self.toasts = QComboBox()
+        self.toasts.addItems([main.toast_combo.itemText(i) for i in range(main.toast_combo.count())])
+        self.toasts.setCurrentIndex(main.toast_combo.currentIndex())
+        g.addWidget(self.toasts, 0, 1)
+        g.addWidget(label("Resource use"), 1, 0)
+        self.res = QComboBox()
+        self.res.addItems([main.res_combo.itemText(i) for i in range(main.res_combo.count())])
+        self.res.setCurrentIndex(main.res_combo.currentIndex())
+        g.addWidget(self.res, 1, 1)
+        g.setColumnStretch(1, 1)
+        l3.addLayout(g)
+        self.sound = QCheckBox("Play a sound with warnings")
+        self.sound.setChecked(main.cb_sound.isChecked())
+        self.auto = QCheckBox("Start watching automatically when this app opens")
+        self.auto.setChecked(main.cb_autostart.isChecked())
+        self.check_now = QCheckBox("Check my OBS settings when I click Finish")
+        self.check_now.setChecked(True)
+        for c in (self.sound, self.auto, self.check_now):
+            l3.addWidget(c)
+        l3.addWidget(label("Before each recording: click “Start watching”, then record in OBS like normal. "
+                           "After you stop recording, the report appears on the Live tab.", "muted", True))
+        l3.addStretch(1)
+        self.stack.addWidget(p3)
+
+        nav = QHBoxLayout()
+        self.cancel = QPushButton("Close")
+        self.cancel.clicked.connect(self.reject)
+        nav.addWidget(self.cancel)
+        nav.addStretch(1)
+        self.back = QPushButton("Back")
+        self.back.clicked.connect(lambda: self.go(self.stack.currentIndex() - 1))
+        self.next = QPushButton("Start checks")
+        self.next.setObjectName("primary")
+        self.next.clicked.connect(self.on_next)
+        nav.addWidget(self.back)
+        nav.addWidget(self.next)
+        root.addLayout(nav)
+        self.go(0)
+
+    def go(self, i):
+        i = max(0, min(2, i))
+        self.stack.setCurrentIndex(i)
+        self.step_lbl.setText(f"Step {i + 1} of 3")
+        self.back.setVisible(i > 0)
+        self.next.setText(("Start checks", "Next", "Finish")[i])
+        if i == 1 and self.checks_lay.count() <= 1:
+            self.run_checks()
+
+    def on_next(self):
+        i = self.stack.currentIndex()
+        if i < 2:
+            self.go(i + 1)
+            return
+        m = self.main
+        m.toast_combo.setCurrentIndex(self.toasts.currentIndex())
+        m.res_combo.setCurrentIndex(self.res.currentIndex())
+        m.cb_sound.setChecked(self.sound.isChecked())
+        m.cb_autostart.setChecked(self.auto.isChecked())
+        m._save_opts()
+        self.completed = True
+        if self.check_now.isChecked():
+            m.tabs.setCurrentIndex(0)
+            m.run_preflight()
+        self.accept()
+
+    def run_checks(self):
+        self.again.setEnabled(False)
+        self.prog.setVisible(True)
+        self.check_status.setText("Checking OBS, the connection, the recording drive, graphics card, HDR and notifications…")
+        while self.checks_lay.count() > 1:
+            w = self.checks_lay.takeAt(0).widget()
+            if w:
+                w.deleteLater()
+        self.main.run_setup_checks()
+
+    def show_results(self, res):
+        self.prog.setVisible(False)
+        self.again.setEnabled(True)
+        n = sum(1 for c in res if c["state"] == "attention")
+        u = sum(1 for c in res if c["state"] == "unknown")
+        self.check_status.setText(("Everything checked looks good." if not n else f"{n} item(s) need attention — the steps are below each one.")
+                                  + (f" {u} item(s) couldn’t be checked yet." if u else "")
+                                  + " Fix what you want, then click Check again, or click Next.")
+        for i, c in enumerate(res):
+            self.checks_lay.insertWidget(i, CheckCard(c))
+
+
 # ------------------------------------------------------------------------------ main window
 class Main(QMainWindow):
     def __init__(self):
@@ -320,6 +576,9 @@ class Main(QMainWindow):
         tabs.addTab(self._help_tab(), "  Help  ")
         self.setCentralWidget(tabs)
         self.statusBar().showMessage(f"Data folder: {DATA}")
+        self.usage_lbl = QLabel("This app: measuring…")
+        self.usage_lbl.setToolTip("CPU and memory used by Live Recording Analyzer itself")
+        self.statusBar().addPermanentWidget(self.usage_lbl)
         self.toast_combo.setToolTip("How the app alerts you while you play")
 
         self.timer = QTimer(self)
@@ -351,10 +610,28 @@ class Main(QMainWindow):
         col = QVBoxLayout()
         self.mon_title = label("Not watching", "h1")
         self.mon_sub = label("Click Start before you play. The advisor watches OBS, the log, the PC and the file, and alerts you with Windows pop-ups.", "muted", True)
-        col.addWidget(self.mon_title)
+        trow = QHBoxLayout()
+        trow.setSpacing(10)
+        trow.addWidget(self.mon_title)
+        self.live_pill = QLabel()
+        self.live_pill.setObjectName("pill")
+        self.live_pill.setCursor(Qt.PointingHandCursor)
+        self.live_pill.setToolTip("Connection to OBS. Click to open Settings.")
+        self.live_pill.mousePressEvent = lambda e: self.tabs.setCurrentIndex(3)
+        set_pill(self.live_pill, "idle", "OBS: checking…")
+        trow.addWidget(self.live_pill, 0, Qt.AlignVCenter)
+        trow.addStretch(1)
+        col.addLayout(trow)
         col.addWidget(self.mon_sub)
+        self.pf_prog = QProgressBar()
+        self.pf_prog.setRange(0, 0)          # moving bar: "working"
+        self.pf_prog.setFixedHeight(6)
+        self.pf_prog.setTextVisible(False)
+        self.pf_prog.setVisible(False)
+        col.addWidget(self.pf_prog)
         tl.addLayout(col, 1)
-        self.pf_btn = QPushButton("Run pre-flight check")
+        self.pf_btn = QPushButton("Check OBS settings")
+        self.pf_btn.setToolTip("Reads your OBS profile, scenes and latest log and lists anything that would cause a problem in your next recording.")
         self.pf_btn.clicked.connect(self.run_preflight)
         tl.addWidget(self.pf_btn, 0, Qt.AlignVCenter)
         self.mon_btn = QPushButton("Start watching")
@@ -406,8 +683,8 @@ class Main(QMainWindow):
         self.cards = {}       # key -> AdviceCard
         self._toast_last = 0
         self.post_local(Advice("hello", "status", "before", "Ready",
-                               "1) Click “Run pre-flight check” to review your OBS settings.  2) Click “Start watching”, then play and record like normal.  "
-                               "3) When you stop recording, I’ll check the file and post a report here."))
+                               "1) Click “Check OBS settings” to look for anything that would cause a problem.  2) Click “Start watching”, then play and record like normal.  "
+                               "3) When you stop recording, the file is checked and a report is posted here."))
         return w
 
     def _set_dot(self, color):
@@ -485,7 +762,7 @@ class Main(QMainWindow):
                 self.last_video = p
                 if self.advisor:
                     self.advisor.rec_path = p
-                self.post_local(Advice("located", "status", "after", "Got it", f"I’ll use {p} for the analysis."))
+                self.post_local(Advice("located", "status", "after", "Got it", f"The analysis will use {p}."))
         elif action_id in ("analyze_last", "deep_last"):
             self.analyze_last(deep=action_id == "deep_last")
         elif action_id == "open_report" and data:
@@ -510,19 +787,128 @@ class Main(QMainWindow):
                                       f"{e}. Use OBS’s own Pause button, or check the WebSocket settings."))
         threading.Thread(target=go, daemon=True).start()
 
-    # ------------------------------------------------------------------ pre-flight
+    # ------------------------------------------------------------------ OBS settings check
     def run_preflight(self):
+        if not self.pf_btn.isEnabled():
+            return
         self.pf_btn.setEnabled(False)
+        self.pf_btn.setText("Checking…")
+        self.pf_prog.setVisible(True)
+        self.post_local(Advice("pf-progress", "status", "before", "Checking your OBS settings…", "Starting…", update=True))
+
+        def stage(t):
+            self._ui_q.put(("pf-stage", t))
 
         def go():
+            from analyzer import obs_config
+            from analyzer.live import preflight_rules
+            from analyzer.analyze import drive_info
+            t0 = time.time()
             try:
-                items = LiveAdvisor(None).preflight(announce=False)
+                stage("Reading your OBS profile (video, output and encoder settings)…")
+                cfg = obs_config.load()
+                time.sleep(0.25)
+                stage(f"Reading scenes and sources ({len(cfg.capture_devices)} capture device(s), {len(cfg.screen_captures)} screen/game capture(s))…")
+                time.sleep(0.25)
+                stage("Reading the latest OBS log…")
+                log = None
+                logs = obs_log.latest_logs(1)
+                if logs:
+                    try:
+                        log = obs_log.parse(logs[0])
+                    except Exception:
+                        log = None
+                if cfg.rec_path:
+                    stage(f"Checking the recording drive ({cfg.rec_path[:2]})…")
+                    drive_info(cfg.rec_path)
+                stage("Comparing everything…")
+                items = preflight_rules(cfg, log)
             except Exception as e:
-                items = [Advice("pf-error", "warning", "before", "Pre-flight check could not finish", repr(e))]
+                items = [Advice("pf-error", "warning", "before", "The OBS settings check could not finish", repr(e))]
+            left = 1.2 - (time.time() - t0)
+            if left > 0:
+                time.sleep(left)
+            self._ui_q.put("pf-clear")
             for a in reversed(items):     # newest-first feed: keep the summary card on top
                 self._ui_q.put(a)
             self._ui_q.put("pf-done")
         threading.Thread(target=go, daemon=True).start()
+
+    # ------------------------------------------------------------------ OBS connection status
+    def check_connection(self, force=False):
+        """Background check: is OBS open, is WebSocket on, does the password work? Runs every few seconds."""
+        if getattr(self, "_conn_busy", False):
+            return
+        if self.monitor and not force:
+            st = self.monitor.obs_status
+            if st == "connected":
+                self._conn_result({"state": "connected", "label": "Connected to OBS", "detail": "Live skip tracking is on."})
+                return
+        self._conn_busy = True
+        port, pw = self.port.value(), self.pw.text()
+        last = getattr(self, "_conn_last", {}) or {}
+
+        def go():
+            import socket
+            try:
+                open_ = False
+                try:
+                    with socket.create_connection(("127.0.0.1", port), timeout=0.5):
+                        open_ = True
+                except OSError:
+                    pass
+                # Re-use a good result while the port stays open, so OBS isn't asked to log in every few seconds.
+                if open_ and not force and last.get("state") in ("connected", "auth") and last.get("_pw") == pw and last.get("_port") == port:
+                    res = last
+                else:
+                    res = connection_status(port, pw)
+                    if res["state"] == "auth":
+                        cfg = res.get("cfg") or {}
+                        if cfg.get("password") and cfg["password"] != pw:   # OBS has a new password: use it
+                            res2 = connection_status(port, cfg["password"])
+                            res2["_newpw"] = cfg["password"]
+                            res = res2
+                    if res["state"] in ("obs_closed", "ws_off", "port"):
+                        cfg = res.get("cfg") or {}
+                        if cfg.get("found") and cfg.get("password") and not pw:
+                            res["_newpw"] = cfg["password"]
+                res["_pw"], res["_port"] = res.get("_newpw", pw), port
+            except Exception as e:
+                res = {"state": "error", "label": "Couldn’t check OBS", "detail": str(e)}
+            self._ui_q.put(("conn", res))
+        threading.Thread(target=go, daemon=True).start()
+
+    def _conn_result(self, res):
+        self._conn_busy = False
+        prev = (getattr(self, "_conn_last", None) or {}).get("state")
+        self._conn_last = res
+        if res.get("_newpw") and res.get("_newpw") != self.pw.text():
+            self.pw.setText(res["_newpw"])
+            self._save_opts()
+        st = res.get("state")
+        kind = {"connected": "ok", "obs_closed": "idle", "ws_off": "warn", "port": "warn", "auth": "bad"}.get(st, "bad")
+        short = {"connected": "OBS connected", "obs_closed": "OBS not running", "ws_off": "OBS WebSocket off",
+                 "port": "OBS port mismatch", "auth": "OBS password rejected"}.get(st, "OBS not connected")
+        set_pill(self.live_pill, kind, short)
+        set_pill(self.conn_pill, kind, res.get("label", short))
+        self.obs_state.setText(res.get("detail", ""))
+        self.obs_state.setStyleSheet("color:#9aa3b2")
+        if st == "connected":
+            self.obs_hint.setText("Everything is set. The app connects to OBS automatically.")
+            if prev and prev != "connected":
+                self.statusBar().showMessage("Connected to OBS — the WebSocket setup worked.", 8000)
+                self._save_opts()
+        elif st == "ws_off":
+            self.obs_hint.setText("One-time step: in OBS open Tools → WebSocket Server Settings and tick “Enable WebSocket server”, then click OK. "
+                                  "This status updates by itself within a few seconds.")
+        elif st == "obs_closed":
+            cfg = res.get("cfg") or {}
+            self.obs_hint.setText("WebSocket is turned on in OBS. Open OBS and this connects by itself." if cfg.get("enabled") else
+                                  "Open OBS. If you haven’t yet: Tools → WebSocket Server Settings → tick “Enable WebSocket server” → OK.")
+        elif st == "auth":
+            self.obs_hint.setText("The password here doesn’t match OBS. In OBS: Tools → WebSocket Server Settings → Show Connect Info → copy the Server Password and paste it below.")
+        if hasattr(self, "test_btn"):
+            self.test_btn.setEnabled(True)
 
     # ------------------------------------------------------------------ watch start/stop
     def toggle_monitor(self):
@@ -542,7 +928,8 @@ class Main(QMainWindow):
                 psutil.Process().nice(psutil.BELOW_NORMAL_PRIORITY_CLASS)
         except Exception:
             pass
-        self.monitor = Monitor(self.session_dir, interval=1.0, obs_port=self.port.value(), obs_password=self.pw.text())
+        light = self.res_combo.currentIndex() == 1
+        self.monitor = Monitor(self.session_dir, interval=2.0 if light else 1.0, obs_port=self.port.value(), obs_password=self.pw.text(), light=light)
         self.monitor.start()
         self.advisor = LiveAdvisor(self.monitor)
         self.advisor.start()
@@ -578,12 +965,12 @@ class Main(QMainWindow):
     # ------------------------------------------------------------------ after-recording analysis
     def analyze_last(self, deep=False, log_path=None, video=None):
         if self.worker:
-            self.post_local(Advice("an-busy", "status", "after", "An analysis is already running", "I’ll post the result here when it’s done."))
+            self.post_local(Advice("an-busy", "status", "after", "An analysis is already running", "The result will appear here when it’s done."))
             return
         logs = obs_log.latest_logs(1)
         log_path = log_path or (logs[0] if logs else None)
         if not log_path:
-            self.post_local(Advice("need-log", "request", "after", "I need the OBS log for this recording",
+            self.post_local(Advice("need-log", "request", "after", "The OBS log for this recording is needed",
                                    "OBS → Help → Log Files → Show Log Files, then pick the newest file.",
                                    actions=[("Browse for log…", "browse_log", None)]))
             return
@@ -601,7 +988,7 @@ class Main(QMainWindow):
         vid = video or getattr(self, "last_video", None) or lg.recordings[idx].path
         if not vid or not os.path.isfile(vid):
             self.post_local(Advice("need-video", "request", "after", "Where is the recording file?",
-                                   f"I couldn’t open {vid or 'the file'}. If you moved it, point me to it. I’ll still analyze the log and PC data without it.",
+                                   f"Couldn’t open {vid or 'the file'}. If you moved it, click Locate file. The log and PC data are still analyzed without it.",
                                    actions=[("Locate file…", "locate_video", None)]))
             vid = None
         mon = os.path.join(self.session_dir, "monitor.jsonl") if self.session_dir else None
@@ -630,8 +1017,26 @@ class Main(QMainWindow):
                 break
             if a == "pf-done":
                 self.pf_btn.setEnabled(True)
+                self.pf_btn.setText("Check OBS settings")
+                self.pf_prog.setVisible(False)
+            elif a == "pf-clear":
+                self._dismiss("pf-progress")
+            elif isinstance(a, tuple) and a[0] == "pf-stage":
+                self.post_local(Advice("pf-progress", "status", "before", "Checking your OBS settings…", a[1], update=True))
+            elif isinstance(a, tuple) and a[0] == "conn":
+                self._conn_result(a[1])
+            elif isinstance(a, tuple) and a[0] == "setup":
+                if getattr(self, "_wizard", None):
+                    self._wizard.show_results(a[1])
             else:
                 self.post_local(a)
+        now = time.time()
+        if now - getattr(self, "_conn_t", 0) >= (4 if self.isVisible() else 15):
+            self._conn_t = now
+            self.check_connection()
+        if now - getattr(self, "_self_t", 0) >= 5:
+            self._self_t = now
+            self._update_self_usage()
         if self.advisor:
             for a in self.advisor.drain():
                 self.post_local(a)
@@ -641,7 +1046,7 @@ class Main(QMainWindow):
                 self.last_video = rec
                 QTimer.singleShot(4000, lambda lp=log_path, r=rec: self.analyze_last(log_path=lp or None, video=r or None))
         m = self.monitor
-        if not m:
+        if not m or not self.isVisible():      # nothing to draw while minimized to the tray
             return
         s = m.latest or {}
         o = s.get("obs") or {}
@@ -657,7 +1062,7 @@ class Main(QMainWindow):
             self.mon_title.setText(f"Watching — not recording yet ({analyze.fmt_t(el)})" if not self.advisor or not self.advisor.cards.get("rec-start")
                                    else f"Watching — recording stopped ({analyze.fmt_t(el)})")
             self._set_dot("#3ecf8e")
-        self.mon_sub.setText(f"OBS {m.obs_status}  ·  {m.counts['samples']:,} samples  ·  watching for {analyze.fmt_t(el)}  ·  minimize me, alerts will pop up")
+        self.mon_sub.setText(f"{'Light mode  ·  ' if m.light else ''}OBS {m.obs_status}  ·  {m.counts['samples']:,} samples  ·  watching for {analyze.fmt_t(el)}  ·  you can minimize this window, alerts will pop up")
         if o:
             if o.get("rec"):
                 self.t_rec.set("PAUSED" if o.get("rec_paused") else "REC", f"{o.get('rec_mbs', 0) or 0:.0f} MB/s written")
@@ -706,7 +1111,11 @@ class Main(QMainWindow):
         obs = card()
         ol = QGridLayout(obs)
         ol.setContentsMargins(18, 14, 18, 14)
-        ol.addWidget(label("OBS connection", "h2"), 0, 0, 1, 4)
+        ol.addWidget(label("OBS connection", "h2"), 0, 0, 1, 2)
+        self.conn_pill = QLabel()
+        self.conn_pill.setObjectName("pill")
+        set_pill(self.conn_pill, "idle", "Checking…")
+        ol.addWidget(self.conn_pill, 0, 2, 1, 3, Qt.AlignLeft | Qt.AlignVCenter)
         cfg = obs_ws_config()
         self.obs_hint = label("", "muted", True)
         ol.addWidget(self.obs_hint, 1, 0, 1, 5)
@@ -720,18 +1129,18 @@ class Main(QMainWindow):
         self.pw.setEchoMode(QLineEdit.Password)
         self.pw.setPlaceholderText("auto-filled from OBS if found")
         ol.addWidget(self.pw, 2, 3)
-        self.test_btn = QPushButton("Test connection")
+        self.port.setToolTip("Use the arrows or type a number. OBS uses 4455 unless you changed it.")
+        self.port.setMinimumWidth(110)
+        self.test_btn = QPushButton("Check again")
+        self.test_btn.setToolTip("Re-reads OBS’s WebSocket settings and tries to connect right now. The status also updates by itself every few seconds.")
         self.test_btn.clicked.connect(self.test_obs)
         ol.addWidget(self.test_btn, 2, 4)
         self.obs_state = label("", "muted", True)
         ol.addWidget(self.obs_state, 3, 0, 1, 5)
         ol.setColumnStretch(3, 1)
-        if cfg["found"]:
-            self.obs_hint.setText("OBS settings found and filled in automatically." if cfg["enabled"] else
-                                  "OBS WebSocket is turned off. In OBS open Tools → WebSocket Server Settings and tick “Enable WebSocket server”. "
-                                  "This lets the advisor see each skipped frame the second it happens and pause recording for you.")
-        else:
-            self.obs_hint.setText("In OBS open Tools → WebSocket Server Settings, tick “Enable WebSocket server”, click “Show Connect Info” and copy the password here.")
+        self.obs_hint.setText("Checking whether OBS is open and accepting connections…")
+        self.port.valueChanged.connect(lambda _v: self.check_connection(force=True))
+        self.pw.editingFinished.connect(lambda: self.check_connection(force=True))
         root.addWidget(obs)
 
         al = card()
@@ -761,12 +1170,41 @@ class Main(QMainWindow):
         self.cb_tray.setChecked(self.settings.get("tray", True))
         self.cb_autoanalyze = QCheckBox("When a recording stops, analyze it automatically and post the report in the Advisor")
         self.cb_autoanalyze.setChecked(self.settings.get("autoanalyze", True))
+        rrow = QHBoxLayout()
+        rrow.addWidget(label("Resource use while watching"))
+        self.res_combo = QComboBox()
+        self.res_combo.addItems(["Normal — checks every second", "Light — checks every 2 seconds, fewer program scans"])
+        self.res_combo.setCurrentIndex(int(self.settings.get("light", 0)))
+        self.res_combo.currentIndexChanged.connect(self._save_opts)
+        rrow.addWidget(self.res_combo)
+        rrow.addStretch(1)
         for c in (self.cb_autostart, self.cb_tray, self.cb_autoanalyze, self.cb_sound):
             c.stateChanged.connect(self._save_opts)
         for c in (self.cb_autostart, self.cb_tray, self.cb_autoanalyze):
             opl.addWidget(c)
+        opl.addLayout(rrow)
+        opl.addWidget(label("The app runs at low priority so the game and OBS always come first. Light mode halves its work; "
+                            "use it on older PCs. Changes apply the next time you start watching. Its own CPU and memory use is shown at the bottom of the window.",
+                            "muted", True))
         opl.addWidget(label("The app never changes OBS settings by itself. It only recommends changes, and pauses or resumes recording when you click the button.", "muted", True))
         root.addWidget(opts)
+
+        su = card()
+        sul = QHBoxLayout(su)
+        sul.setContentsMargins(18, 12, 18, 12)
+        sc = QVBoxLayout()
+        sc.addWidget(label("Guided setup", "h2"))
+        sc.addWidget(label("Checks this PC step by step — OBS, the connection, the recording drive, graphics card, HDR and notifications — "
+                           "and shows what to change, if anything.", "muted", True))
+        self.cb_ask_setup = QCheckBox("Ask about guided setup when the app opens")
+        self.cb_ask_setup.setChecked(not self.settings.get("setup_remember", False))
+        self.cb_ask_setup.stateChanged.connect(self._save_opts)
+        sc.addWidget(self.cb_ask_setup)
+        sul.addLayout(sc, 1)
+        b = QPushButton("Run guided setup")
+        b.clicked.connect(self.open_setup)
+        sul.addWidget(b, 0, Qt.AlignVCenter)
+        root.addWidget(su)
         root.addStretch(1)
         return w
 
@@ -776,22 +1214,77 @@ class Main(QMainWindow):
         self.settings.update({"autostart": self.cb_autostart.isChecked(), "tray": self.cb_tray.isChecked(),
                               "autoanalyze": self.cb_autoanalyze.isChecked(), "port": self.port.value(), "password": self.pw.text(),
                               "toasts": self.toast_combo.currentIndex(), "sound": self.cb_sound.isChecked(),
-                              "deep": self.cb_deep.isChecked() if hasattr(self, "cb_deep") else False})
+                              "deep": self.cb_deep.isChecked() if hasattr(self, "cb_deep") else False,
+                              "light": self.res_combo.currentIndex() if hasattr(self, "res_combo") else 0})
+        if hasattr(self, "cb_ask_setup"):
+            self.settings["setup_remember"] = not self.cb_ask_setup.isChecked()
         save_settings(self.settings)
 
     def test_obs(self):
         self.test_btn.setEnabled(False)
-        self.obs_state.setText("Connecting…")
-        self._tw = TestObsWorker(self.port.value(), self.pw.text())
-        self._tw.result.connect(self._obs_result)
-        self._tw.start()
+        set_pill(self.conn_pill, "idle", "Checking…")
+        self.obs_state.setText("Re-reading OBS’s WebSocket settings and connecting…")
+        self._conn_busy = False
+        self.check_connection(force=True)
 
-    def _obs_result(self, ok, msg):
-        self.test_btn.setEnabled(True)
-        self.obs_state.setText(("Connected. " if ok else "Not connected. ") + msg)
-        self.obs_state.setStyleSheet(f"color:{'#3ecf8e' if ok else '#ff5d5d'}")
-        if ok:
-            self._save_opts()
+    def _update_self_usage(self):
+        try:
+            import psutil
+            if not hasattr(self, "_proc"):
+                self._proc = psutil.Process()
+                self._proc.cpu_percent(None)
+                return
+            cpu = self._proc.cpu_percent(None) / max(psutil.cpu_count() or 1, 1)
+            mem = self._proc.memory_info().rss / 1048576
+            self.usage_lbl.setText(f"This app: {cpu:.1f}% CPU · {mem:.0f} MB RAM")
+        except Exception:
+            pass
+
+    # ------------------------------------------------------------------ guided setup
+    def maybe_offer_setup(self):
+        if self.settings.get("setup_remember") or self.settings.get("setup_done"):
+            if self.settings.get("setup_remember") and self.settings.get("setup_choice") == "yes" and not self.settings.get("setup_done"):
+                QTimer.singleShot(300, self.open_setup)
+            return
+        d = SetupOffer(self)
+        yes = d.exec() == QDialog.Accepted
+        self.settings["setup_choice"] = "yes" if yes else "no"
+        self.settings["setup_remember"] = d.remember.isChecked()
+        self.cb_ask_setup.setChecked(not d.remember.isChecked())
+        save_settings(self.settings)
+        if yes:
+            self.open_setup()
+
+    def open_setup(self):
+        if getattr(self, "_wizard", None):
+            self._wizard.raise_()
+            return
+        self._wizard = SetupWizard(self)
+        self._wizard.finished.connect(self._setup_closed)
+        self._wizard.show()
+
+    def _setup_closed(self, _code):
+        if self._wizard and self._wizard.completed:
+            self.settings["setup_done"] = True
+            save_settings(self.settings)
+        self._wizard = None
+
+    def run_setup_checks(self):
+        port, pw = self.port.value(), self.pw.text()
+
+        def go():
+            try:
+                res = system_check.run_all(port, pw)
+            except Exception as e:
+                res = [{"key": "err", "title": "Setup checks", "state": "unknown", "summary": repr(e), "steps": [], "action": None}]
+            self._ui_q.put(("setup", res))
+        threading.Thread(target=go, daemon=True).start()
+
+    def showEvent(self, e):
+        super().showEvent(e)
+        if not getattr(self, "_offered", False):
+            self._offered = True
+            QTimer.singleShot(700, self.maybe_offer_setup)
 
 
     # ------------------------------------------------------------------ analyze tab
@@ -1156,31 +1649,39 @@ class Main(QMainWindow):
         w.setHtml(f"""
 <div style='padding:14px;line-height:150%'>
 <h2>How to use</h2>
+<h3>First time</h3>
+<p>When the app opens it asks whether you want a <b>guided setup</b>. Choose <b>Yes, guide me</b> to have it check this PC step by step, or
+<b>No, I’ll set it up myself</b>. Tick <b>Remember my choice</b> to stop the question. You can run it any time from <b>Settings → Run guided setup</b>.</p>
 <h3>Before you record</h3>
 <ol>
-<li>Open OBS, then this app. Click <b>Run pre-flight check</b>. The Advisor reads your OBS profile, scene sources and last log, and lists anything to fix first:
-color range, color format vs. encoder bit depth, capture-card FPS (59.94 vs 60), audio sample rates, HDR without “Force SDR”, a slow or nearly full recording drive, heavy encoder presets, and more. Each message has step-by-step instructions.</li>
+<li>Open OBS, then this app. Click <b>Check OBS settings</b>. A moving bar and a “Checking your OBS settings…” message show each step while it reads your OBS profile, scenes and sources, the latest OBS log and the recording drive.
+Then the Advisor lists only what would cause a problem in your next recording — for example a frame-rate mismatch between a capture device and OBS, an HDR/SDR conflict,
+a missing or nearly full recording drive, or encoder settings that already caused skips. Each message gives the exact steps for your OBS setup. Lower-priority items are marked as tips.</li>
 <li>Click <b>Start watching</b>, minimize the window, and play.</li>
 </ol>
 <h3>While you record</h3>
-<p>Every second the Advisor checks OBS (skipped frames, FPS, render time), the OBS log, the GPU encoder and 3D load, CPU, RAM, GPU temperature, the recording drive, and whether the file is still growing.
+<p>The Advisor checks OBS (skipped frames, FPS, render time), the OBS log, the graphics card, CPU, memory, the recording drive, and whether the file is still growing.
 About 25 seconds in, it opens the file to confirm the resolution, frame rate, color settings and audio match what you set.
-When something goes wrong it posts a message with the time, the position in the video, the likely cause, and what to do. You get a Windows pop-up, so you don't have to look at the app.
+When something goes wrong it posts a message with the time, the position in the video, the likely cause, and what to do. You also get a Windows pop-up, so you don't have to look at the app.
 Some messages have a <b>Pause recording</b> button. Use it, fix the setting, then click <b>Resume</b>.</p>
 <h3>After you record</h3>
 <p>When you stop recording, the app analyzes that recording automatically and posts a summary with <b>Open report</b> and <b>Run deep scan</b> buttons.
-If it can't find the file or log, it asks you for it with a <b>Locate file</b> or <b>Browse for log</b> button. You also get tips for afterward, such as remuxing MKV for editing.</p>
-<h3>One-time setup</h3>
-<p>In OBS open <b>Tools → WebSocket Server Settings</b> and tick <b>Enable WebSocket server</b>. The app fills in the password automatically.
-Without this, the app still reads the log, the PC data and the file, but it can't see skips the second they happen or pause recording for you.
-For pop-ups over full-screen games, turn off “Do not disturb” for games in Windows notification settings.</p>
+If it can't find the file or log, it asks for it with a <b>Locate file</b> or <b>Browse for log</b> button.</p>
+<h3>Connecting to OBS (one time)</h3>
+<p>In OBS open <b>Tools → WebSocket Server Settings</b>, tick <b>Enable WebSocket server</b> and click <b>OK</b>. The status pill on the Live tab and in Settings turns green
+(“Connected to OBS”) within a few seconds — you don't need to restart this app. The password is read from OBS automatically. If the pill says
+<b>WebSocket off</b>, <b>Password rejected</b> or <b>port mismatch</b>, Settings shows exactly what to do; <b>Check again</b> retries right away.
+Without the connection, the app still reads the log, the PC data and the file, but it can't see skips the second they happen or pause recording for you.</p>
+<h3>Light on your PC</h3>
+<p>The app and the tools it starts run at low priority, so your game and OBS always come first. In <b>Settings → Resource use</b>, <b>Light</b> mode checks every 2 seconds and scans programs less often — use it on older PCs.
+The app's own CPU and memory use is shown at the bottom right of the window. While it's minimized to the tray it stops drawing the dashboard.</p>
 <p style='color:#9aa3b2'>The app never changes OBS settings by itself. Likely causes are educated guesses from what the PC was doing at that moment.</p>
 <h3>What the report checks</h3>
 <ul>
 <li>Rendering-lag and encoding-lag skips, with clock time <i>and</i> position in the video</li>
 <li>Missing frames (timestamp gaps) and variable frame timing in the file</li>
-<li>Deep scan: repeated and frozen frames, including the regular stutter caused by 59.94 vs 60 fps mismatches</li>
-<li>Audio gaps, audio/video drift, audio sample-rate mismatches, audio buffering changes</li>
+<li>Deep scan: repeated and frozen frames, including the regular stutter caused by frame-rate mismatches (for example 59.94 vs 60)</li>
+<li>Audio gaps, audio/video drift, and audio that arrives late (with the sample rate, when it’s part of the cause)</li>
 <li>Resolution, frame rate, color format, color space, color range and bit depth — OBS settings vs. what the file actually contains</li>
 <li>Capture-device settings, HDR/SDR conflicts, encoder settings that are too heavy</li>
 <li>What the PC was doing at each problem: GPU 3D and encoder load, CPU, RAM, recording drive busy/latency, GPU temperature, busiest programs</li>
@@ -1251,9 +1752,10 @@ def selftest(out):
         lines.append("ffprobe: " + str(video_probe._tool("ffprobe")))
         lines.append("ffmpeg: " + str(video_probe._tool("ffmpeg")))
         app = QApplication(sys.argv)
-        app.setStyleSheet(STYLE.replace("CHECK_SVG", resource("check.svg").replace("\\", "/")))
+        app.setStyleSheet(app_style())
         w = Main()
         w.run_preflight()
+        system_check.run_all()
         m = Monitor(os.path.join(SESSIONS, "_selftest"), interval=1.0)
         m.start()
         time.sleep(3)
@@ -1276,9 +1778,15 @@ def main():
     if sys.platform == "win32":
         try:
             import ctypes
-            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("bloodrive.obssessionanalyzer")
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("bloodrive.liverecordinganalyzer")
         except Exception:
             pass
+    try:   # stay out of the game's and OBS's way
+        import psutil
+        if sys.platform == "win32":
+            psutil.Process().nice(psutil.BELOW_NORMAL_PRIORITY_CLASS)
+    except Exception:
+        pass
     app = QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
     app.setStyle("Fusion")
@@ -1291,7 +1799,7 @@ def main():
     pal.setColor(QPalette.ButtonText, QColor("#e7e9ee"))
     pal.setColor(QPalette.Highlight, QColor("#c23b3b"))
     app.setPalette(pal)
-    app.setStyleSheet(STYLE.replace("CHECK_SVG", resource("check.svg").replace("\\", "/")))
+    app.setStyleSheet(app_style())
     app.setQuitOnLastWindowClosed(False)
     w = Main()
     if "--minimized" in sys.argv and QSystemTrayIcon.isSystemTrayAvailable():

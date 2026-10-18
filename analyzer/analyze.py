@@ -14,7 +14,8 @@ from . import video_probe
 from . import winevents
 from .monitor import load_session
 
-CREATE_NO_WINDOW = 0x08000000 if sys.platform == "win32" else 0
+# no console window + below-normal priority, so helper programs never compete with the game or OBS
+CREATE_NO_WINDOW = (0x08000000 | 0x00004000) if sys.platform == "win32" else 0
 SEV_ORDER = {"critical": 0, "warning": 1, "info": 2, "good": 3}
 
 
@@ -305,7 +306,7 @@ def run(log_path: Optional[str], video_paths: dict | None = None, monitor_path: 
             findings.append(Finding("info", "Color", "Windows HDR is turned on for a monitor",
                                     ", ".join(f"{d.get('name')} ({d.get('size')}, {d.get('refresh')} Hz)" for d in hdr_displays) + " is running in HDR (PQ/BT.2020).",
                                     "When the OBS canvas is SDR (Rec. 709), any Display/Window/Game Capture of an HDR screen must be tone-mapped. If “Force SDR” is off the result can look washed out or too dark.",
-                                    "For SDR recordings of PC games: tick “Force SDR” on the capture source, or turn Windows HDR off while recording. Capture-card (PS5) sources are not affected by this setting."))
+                                    "For SDR recordings of PC games: tick “Force SDR” on the capture source, or turn Windows HDR off while recording. Game Capture has no Force SDR box — use its Color Space setting instead. Capture-card sources are not affected."))
         if log.browser_errors >= 20:
             findings.append(Finding("info", "OBS", f"Browser sources logged {log.browser_errors} script errors",
                                     "Widgets (chat, alerts, ads) are throwing JavaScript errors.",
@@ -508,28 +509,27 @@ def _recording_findings(log, r: RecordingResult, F: list):
             elif abs(ratio - round(ratio)) < 0.002 and round(ratio) >= 2:
                 add("info", "Frame rate", f"{dname} runs at {d.fps:g} fps but OBS records at {canvas_fps:g} fps",
                     "OBS keeps every other frame.", "Works fine, but uses extra USB bandwidth and CPU for frames that are thrown away.",
-                    f"Set the device FPS to {canvas_fps:g} in its properties.")
+                    f"Optional: double-click the source → Resolution/FPS Type: Custom → FPS: {canvas_fps:g} (or “Match Output FPS”).")
             else:
                 period = 1 / abs(d.fps - canvas_fps) if abs(d.fps - canvas_fps) > 0 else 0
                 add("warning", "Frame rate", f"Frame-rate mismatch: {dname} {d.fps:g} fps vs OBS {canvas_fps:g} fps",
                     f"The source and OBS run at slightly different rates.",
                     f"OBS has to repeat or drop a frame about every {period:.1f} seconds, which shows up as a regular micro-stutter." if period else "",
-                    "Make the device FPS and Settings → Video → Common FPS identical (e.g. both 60, or both 59.94).")
+                    "Double-click the source → Resolution/FPS Type: Custom → FPS: match OBS → Settings → Video → Common FPS Values (both 60, or both 59.94).")
         b = _res(vs.base_res) if vs else None
         dr = _res(d.resolution)
         if b and dr and dr != b:
             add("info", "Video settings", f"{dname} is {d.resolution}, canvas is {vs.base_res}",
                 "OBS scales this source to fit the canvas.",
                 "Fine if intended; upscaling adds no detail and costs GPU time.", "Match the device resolution to the canvas when possible.")
-        if d.sample_rate and log and log.audio_rate and d.sample_rate != log.audio_rate:
-            add("warning", "Audio", f"Audio sample-rate mismatch: {dname} {d.sample_rate} Hz vs OBS {log.audio_rate} Hz",
-                "OBS has to resample this device’s audio in real time.",
-                "Resampling between 44.1 kHz and 48 kHz can add crackles and slow audio drift on long recordings, and makes OBS raise audio buffering.",
-                "Set the capture device’s audio to 48 kHz if it offers it (or OBS Settings → Audio → Sample Rate to match the device). Consoles and capture cards normally use 48 kHz.")
-        if d.buffering and d.buffering.lower().startswith("enabled"):
-            add("info", "Capture", f"Buffering is enabled on {dname}",
-                "The device’s frames are buffered.", "Adds delay and can cause A/V sync offsets.",
-                "In the device properties set Buffering to Disable (Elgato recommends this for its cards).")
+        # Only relevant when this source's audio actually misbehaved (OBS kept adding buffering for it).
+        late = (getattr(log, "audio_buffering_sources", []) or []).count(d.name) if log else 0
+        if d.sample_rate and log and log.audio_rate and d.sample_rate != log.audio_rate and late >= 2:
+            from .live import audio_rate_fix
+            add("warning", "Audio", f"Audio from {dname} arrived late {late} times and runs at {d.sample_rate} Hz (OBS: {log.audio_rate} Hz)",
+                "OBS kept adding audio buffering for this source.",
+                "OBS converts the rate in real time; on its own that’s harmless, but combined with repeated late audio it can cause drift or sync offsets.",
+                " ".join(audio_rate_fix(d, log.audio_rate)))
         if d.format and d.format.upper() in ("MJPEG", "MJPG") and (d.hw_decode or "").lower().startswith("disabled"):
             add("info", "Capture", f"{dname} sends MJPEG with hardware decode off",
                 "The CPU has to decompress every frame.", "Costs CPU and can drop frames at high resolutions.",
@@ -549,12 +549,12 @@ def _recording_findings(log, r: RecordingResult, F: list):
         if "x264" in e and vs and _res(vs.output_res) and _res(vs.output_res)[0] >= 2560:
             add("warning", "Encoder", "CPU encoding (x264) at high resolution",
                 f"x264 at {vs.output_res}.", "Software encoding 1440p/4K is extremely CPU heavy and a common cause of encoding lag.",
-                "Use your GPU’s hardware encoder (NVENC) for recording.")
+                "OBS → Settings → Output → Video Encoder → your graphics card’s hardware encoder (NVIDIA NVENC, AMD AMF/VCE or Intel QuickSync).")
     path = o.path or ""
     if path.lower().endswith((".mp4", ".mov")) and "hybrid" not in str(o.encoder).lower():
         add("info", "Recording", "Recording directly to MP4/MOV",
             "If OBS, the PC or the drive crashes, an MP4 file can be unreadable.",
-            "MKV (or Hybrid MP4 in OBS 30.2+) survives crashes.", "Settings → Output → Recording Format → Matroska Video (.mkv) or Hybrid MP4, then remux.")
+            "MKV (or Hybrid MP4 in OBS 30.2+) survives crashes.", "OBS → Settings → Output → Recording Format → Hybrid MP4 (if listed) or Matroska Video (.mkv).")
 
     # --- drive
     dv = r.drive
@@ -565,7 +565,8 @@ def _recording_findings(log, r: RecordingResult, F: list):
         add("info", "Storage", f"Recording drive {dv.get('letter')} is a USB {dv.get('media') or 'drive'} ({dv.get('name')})",
             "External USB drives and enclosures can stall briefly (power saving, spin-down, controller hiccups).",
             "A stall of even a fraction of a second can back up OBS. If incidents line up with drive stalls, this is the likely cause.",
-            "Prefer an internal SSD for active recordings; disable USB selective suspend and drive sleep.")
+            "Prefer an internal SSD. Otherwise: Control Panel → Power Options → Change plan settings → Change advanced power settings → "
+            "Hard disk → Turn off hard disk after → Never, and USB settings → USB selective suspend setting → Disabled.")
     elif (dv.get("media") or "").upper() == "HDD":
         add("info", "Storage", f"Recording drive {dv.get('letter')} is a hard disk ({dv.get('name')})",
             "Hard disks are fine for typical recording bitrates but slow down when other programs use them at the same time.", "", "")

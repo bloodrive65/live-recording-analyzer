@@ -2,7 +2,7 @@
 real time and posts plain-English messages with recommendations.
 
 Phases:
-  before  – pre-flight check of OBS settings before you hit Record
+  before  – OBS settings check before you hit Record
   during  – live alerts while recording (skips, drive stalls, overloads…)
   after   – wrap-up when the recording stops, plus automatic analysis
 """
@@ -25,7 +25,8 @@ from typing import Optional
 from . import obs_config, obs_log, video_probe
 from .analyze import drive_info, explain, metrics_at, fmt_t
 
-CREATE_NO_WINDOW = 0x08000000 if sys.platform == "win32" else 0
+# no console window + below-normal priority, so helper programs never compete with the game or OBS
+CREATE_NO_WINDOW = (0x08000000 | 0x00004000) if sys.platform == "win32" else 0
 
 
 @dataclass
@@ -122,7 +123,7 @@ class LiveAdvisor:
     def stop(self):
         self.stop_evt.set()
 
-    # ------------------------------------------------------------------ pre-flight
+    # ------------------------------------------------------------------ OBS settings check
     def preflight(self, announce=True):
         cfg = obs_config.load()
         self.cfg = cfg
@@ -148,7 +149,7 @@ class LiveAdvisor:
         try:
             self.preflight()
         except Exception as e:
-            self.post(Advice("pf-error", "warning", "before", "Pre-flight check could not finish", str(e)))
+            self.post(Advice("pf-error", "warning", "before", "The OBS settings check could not finish", str(e)))
         self._open_log(seek_end=True)
         last_log_check = 0
         while not self.stop_evt.is_set():
@@ -215,24 +216,24 @@ class LiveAdvisor:
         m = re.search(r"adding (\d+) milliseconds of audio buffering, total audio buffering is now (\d+) milliseconds \(source: (.*)\)", t)
         if m:
             add, total, src = int(m.group(1)), int(m.group(2)), m.group(3)
+            self._abuf = getattr(self, "_abuf", {})
+            self._abuf[src] = self._abuf.get(src, 0) + 1
             sev = "critical" if total >= 500 else "warning"
             self.post(Advice(f"audiobuf-{src}", sev, "during", f"Audio from “{src}” arrived late — OBS added {add} ms of audio buffering",
                              f"Total audio buffering is now {total} ms. Audio and video may be briefly out of sync around this moment.",
-                             steps=["If this keeps happening, check that the device’s audio is 48 kHz (same as OBS → Settings → Audio).",
-                                    "Plug the capture card directly into a rear USB port, not a hub.",
-                                    "Restarting OBS resets audio buffering."],
+                             steps=audio_late_steps(src, self.log_obj, self._abuf[src]),
                              video_t=self._vt()), cooldown=60)
         elif "max audio buffering reached" in tl or "audio is lagging" in tl:
             self.post(Advice("audiobuf-max", "critical", "during", "OBS hit its maximum audio buffering",
                              "A source keeps delivering audio late. Expect audio dropouts or desync.",
                              steps=["Pause recording and check which audio device is misbehaving (see earlier messages).",
-                                    "Match sample rates (48 kHz everywhere), or remove the problem source and add it again."],
+                                    "Restart OBS before the next recording — that resets audio buffering."],
                              actions=[("Pause recording", "pause", None)], video_t=self._vt()), cooldown=120)
         elif re.search(r"Video configuration failed|Video format match failed|ResolutionValid failed|DecodeDeviceId failed", t):
             if self.recording:
                 self.post(Advice("capfail", "critical", "during", "Capture device configuration failed",
                                  f"OBS log: {t[:160]}",
-                                 steps=["Check the capture card’s USB/HDMI cables and that the console is outputting a signal.",
+                                 steps=["Check the capture device’s cables and that the console, camera or PC feeding it is turned on and sending a picture.",
                                         "Open the device’s properties and press Deactivate → Activate.",
                                         "Make sure the device resolution/FPS is one the card supports for the current input."],
                                  video_t=self._vt()), cooldown=60)
@@ -397,7 +398,7 @@ class LiveAdvisor:
         d = self.drive or {}
         where = f" to {d.get('letter')}" + (f" ({d.get('name')})" if d.get("name") else "") if d.get("letter") else ""
         self.post(Advice(f"rec-start-{self.rec_start:%H%M%S}", "status", "during", f"Recording started{where}",
-                         "Watching for skipped frames, drive stalls and overloads. I’ll check the file itself in about 25 seconds."))
+                         "Watching for skipped frames, drive stalls and overloads. The file itself gets checked in about 25 seconds."))
 
     def _on_record_stop(self, s):
         self.recording = False
@@ -428,7 +429,7 @@ class LiveAdvisor:
                 path = ""
         if not path or not os.path.isfile(path):
             self.post(Advice("fcheck-none", "request", "during", "Couldn’t find the file being recorded",
-                             "I’ll analyze it after you stop. If you record somewhere unusual, you can point me to it then.",
+                             "It will be analyzed after you stop. If you record somewhere unusual, you can point the app to it then.",
                              actions=[("Locate file…", "locate_video", None)]))
             return
         a = quick_file_check(path, self.cfg)
@@ -457,34 +458,72 @@ def recommend(kind, ckey, cfg, m, drive) -> list:
     es = (cfg.encoder_settings if cfg else {}) or {}
     preset = str(es.get("preset2") or es.get("preset") or "").lower()
     steps = []
+    path = cfg.enc_path if cfg else (lambda o: f"OBS → Settings → Output → {o}")
     if ckey == "encoder":
-        if preset in ENC_HEAVY_PRESETS:
-            steps.append(f"Pause recording, then Settings → Output → Recording → Preset: change {preset.upper()} to a faster one (e.g. P4 or P3).")
+        if "x264" in str(cfg.rec_encoder if cfg else "").lower():
+            steps.append("You’re encoding on the CPU (x264). " + path("Video Encoder") + " → pick your graphics card’s hardware encoder "
+                         "(NVIDIA NVENC, AMD AMF/VCE or Intel QuickSync).")
+        elif preset in ENC_HEAVY_PRESETS:
+            steps.append(f"Pause recording, then {path('Preset')} → change {preset.upper()} to a faster one (e.g. P4 or P3).")
         else:
-            steps.append("Pause recording, then Settings → Output → Recording → choose a faster Preset (e.g. P3).")
+            steps.append(f"Pause recording, then {path('Preset')} → choose a faster one.")
         if str(es.get("multipass", "")).lower() in ("fullres", "2"):
-            steps.append("Set Multipass Mode to “Two Passes (Quarter Resolution)” or “Single Pass”.")
+            steps.append(path("Multipass Mode") + " → “Two Passes (Quarter Resolution)” or “Single Pass”.")
         if es.get("lookahead"):
-            steps.append("Turn Look-ahead off.")
-        steps.append("If it still can’t keep up at 4K60, record at 1440p or use HEVC instead of AV1 (or the other way around — test both).")
+            steps.append(path("Look-ahead") + " → untick it.")
+        steps.append("If it still can’t keep up, lower the recording resolution or frame rate (OBS → Settings → Video), or try a different codec (HEVC/H.264/AV1).")
     elif ckey == "disk":
         letter = (drive or {}).get("letter") or "the recording drive"
-        steps.append(f"{letter} couldn’t keep up. After this recording, change Settings → Output → Recording Path to an internal SSD (e.g. C:) and move files later.")
+        rp = cfg.rec_path_setting() if cfg else "OBS → Settings → Output → Recording Path"
+        steps.append(f"{letter} couldn’t keep up. After this recording, change {rp} to an internal SSD and move files later.")
         if (drive or {}).get("bus", "").upper() == "USB":
-            steps.append("USB enclosures can sleep/stall: disable USB selective suspend (Power Options) and drive sleep in the enclosure’s settings.")
+            steps.append("USB drives can go to sleep mid-recording. Windows: Control Panel → Power Options → Change plan settings → "
+                         "Change advanced power settings → Hard disk → Turn off hard disk after → Never, and "
+                         "USB settings → USB selective suspend setting → Disabled.")
         steps.append("Avoid copying files or running backups to the same drive while recording.")
     elif ckey == "gpu":
-        steps.append("Cap your game’s frame rate a little below your monitor’s refresh rate (in-game limiter or NVIDIA Control Panel → Max Frame Rate).")
+        steps.append("Cap the game’s frame rate a little below your monitor’s refresh rate: use the game’s own limiter, or "
+                     "NVIDIA Control Panel → Manage 3D Settings → Max Frame Rate, or AMD Software → Gaming → Graphics → Frame Rate Target Control.")
         steps.append("Run OBS as administrator so it gets GPU priority.")
         if cfg and cfg.browser_sources >= 3:
             steps.append(f"Your scene collection has {cfg.browser_sources} browser sources — hide/remove ones you don’t need.")
-        steps.append("Use Bicubic instead of Lanczos if OBS is scaling the canvas.")
+        if cfg and cfg.base_res and cfg.output_res and cfg.base_res != cfg.output_res:
+            steps.append("OBS → Settings → Video → Downscale Filter → Bicubic (lighter than Lanczos).")
     elif ckey == "cpu":
         steps.append("Close heavy background programs (see the busiest programs listed in the report).")
     elif ckey == "other":
         steps.append("Another program spiked at that moment — close it or schedule it for after recording.")
     else:
         steps.append("No clear cause yet — keep playing. The after-recording report will check the file and the full timeline.")
+    return steps
+
+
+def audio_rate_fix(dev, obs_rate: int) -> list:
+    """Correct steps for a capture device whose audio runs at a different rate than OBS."""
+    if dev.separate_audio or dev.uses_device_audio is False:
+        return [f"The source takes its sound from a separate audio device at {dev.sample_rate / 1000:g} kHz (OBS runs at {obs_rate / 1000:g} kHz).",
+                "Option A: double-click the source → untick “Use custom audio device” so OBS takes the sound straight from the video device.",
+                "Option B: add the sound as its own source instead: Sources → + → Audio Input Capture → pick the capture device’s audio, "
+                "then mute the video source in the Audio Mixer so you don’t hear it twice.",
+                f"Windows: Control Panel → Sound → Recording tab → that audio device → Properties → Advanced → Default Format → {obs_rate} Hz (if offered)."]
+    return [f"Windows: Control Panel → Sound → Recording tab → the capture device → Properties → Advanced → Default Format → {obs_rate} Hz (if offered),",
+            f"or change OBS → Settings → Audio → General → Sample Rate to {dev.sample_rate} Hz to match the device."]
+
+
+def audio_late_steps(src: str, log, times: int = 2) -> list:
+    """Only blame things that actually apply to this source."""
+    steps = []
+    dev = None
+    if log:
+        for d in log.devices:
+            if d.name == src:
+                dev = d
+    if times >= 2 and dev is not None and dev.sample_rate and log.audio_rate and dev.sample_rate != log.audio_rate:
+        steps += audio_rate_fix(dev, log.audio_rate)
+    if dev is not None:
+        steps.append("Plug the capture device straight into a USB port on the PC (rear ports are best), not a hub or front-panel port.")
+    steps.append("One message when a source starts is normal. If it keeps happening: right-click the source → Deactivate, then Activate, "
+                 "or restart OBS between recordings.")
     return steps
 
 
@@ -500,8 +539,8 @@ def preflight_rules(cfg: obs_config.ObsConfig, log: Optional[obs_log.ObsLog]) ->
     if ws and not ws.get("server_enabled", False):
         A.append(Advice("pf-ws", "request", P, "Turn on OBS WebSocket (one-time)",
                         "Lets this app see the exact second OBS skips a frame and pause recording for you.",
-                        steps=["In OBS: Tools → WebSocket Server Settings.", "Tick “Enable WebSocket server” → Apply → OK.",
-                               "Come back here — the password is read automatically."]))
+                        steps=["In OBS: Tools → WebSocket Server Settings.", "Tick “Enable WebSocket server” → click OK.",
+                               "Come back here — the connection status turns green within a few seconds and the password is read automatically."]))
     # color
     if cfg.found:
         es = cfg.encoder_settings or {}
@@ -515,7 +554,7 @@ def preflight_rules(cfg: obs_config.ObsConfig, log: Optional[obs_log.ObsLog]) ->
         if not tenbit_fmt and prof in ("main10", "high10"):
             A.append(Advice("pf-10bit", "tip", P, "Encoder is set to a 10-bit profile, but OBS makes 8-bit pictures",
                             f"Color Format is {cfg.color_format} (8-bit) while the encoder profile is {es.get('profile')}.",
-                            steps=["For normal SDR recording: Settings → Output → Recording → Profile → main.",
+                            steps=["For normal SDR recording: " + cfg.enc_path("Profile") + " → main.",
                                    "For real 10-bit/HDR: Settings → Advanced → Color Format → P010 and Color Space → Rec. 2100 (PQ), with an HDR source."]))
         if hdr_space and not tenbit_fmt:
             A.append(Advice("pf-hdr8", "critical", P, "HDR color space with an 8-bit color format",
@@ -526,31 +565,29 @@ def preflight_rules(cfg: obs_config.ObsConfig, log: Optional[obs_log.ObsLog]) ->
                             steps=["Use profile main10 (HEVC) / 10-bit AV1, or switch Color Format back to NV12."]))
         if hdr_space and cfg.capture_devices:
             A.append(Advice("pf-hdrcap", "tip", P, "HDR recording with a capture card",
-                            "Make sure the console outputs HDR and the capture card passes HDR through, or the picture will look dull.",
-                            steps=["PS5: Settings → Screen and Video → HDR → On When Supported.", "Elgato 4K X: HDR capture must be enabled in its settings."]))
+                            "The device feeding the capture card must send HDR, and the card must pass it through, or the picture will look dull.",
+                            steps=["Turn HDR on in the console or source device’s video settings (for example PS5: Settings → Screen and Video → Video Output → HDR).",
+                                   "Check that your capture card supports HDR capture and that it’s enabled in its own software, if it has a setting for it."]))
         # fps / devices
         for d in cfg.capture_devices:
             if d.get("fps") and cfg.fps and abs(d["fps"] - cfg.fps) > 0.01:
                 ratio = d["fps"] / cfg.fps
                 if abs(ratio - round(ratio)) < 0.002 and round(ratio) >= 2:
                     A.append(Advice(f"pf-fps2-{d['name']}", "tip", P, f"“{d['name']}” runs at {d['fps']:g} fps, OBS at {cfg.fps:g}",
-                                    "OBS discards every other frame. Works, but wastes USB bandwidth.",
-                                    steps=[f"Double-click “{d['name']}” → set FPS to {cfg.fps:g} (or “Match Output FPS”)."]))
+                                    "OBS simply drops the extra frames. This works fine; matching them only saves a little USB bandwidth.",
+                                    steps=[f"Optional: double-click “{d['name']}” → Resolution/FPS Type: Custom → FPS: {cfg.fps:g} (or “Match Output FPS”)."]))
                 else:
                     period = 1 / abs(d["fps"] - cfg.fps)
                     A.append(Advice(f"pf-fps-{d['name']}", "warning", P, f"Frame-rate mismatch: “{d['name']}” {d['fps']:g} fps vs OBS {cfg.fps:g} fps",
                                     f"Causes a repeated or dropped frame about every {period:.0f} seconds (micro-stutter).",
-                                    steps=[f"Double-click “{d['name']}” → set FPS to exactly {cfg.fps:g}, or set OBS → Settings → Video → Common FPS to {d['fps']:g}."]))
-            if d.get("buffering") == 1:
-                A.append(Advice(f"pf-buf-{d['name']}", "tip", P, f"Turn off buffering on “{d['name']}”",
-                                "Buffering adds delay and can shift audio/video sync.",
-                                steps=[f"Double-click “{d['name']}” → Buffering → Disable."]))
+                                    steps=[f"Double-click “{d['name']}” → Resolution/FPS Type: Custom → FPS: {cfg.fps:g} (or “Match Output FPS”).",
+                                           f"Or change OBS → Settings → Video → Common FPS Values to {d['fps']:g}."]))
             dr = str(d.get("color_range", "default")).lower()
             if dr in ("full", "partial") and ((dr == "full") != (cfg.color_range.lower() == "full")):
                 A.append(Advice(f"pf-devrange-{d['name']}", "tip", P, f"“{d['name']}” color range is forced to {dr.title()}",
-                                f"OBS output is {cfg.range_label}. If the device range doesn’t match what the console sends, blacks look grey or crushed.",
+                                f"OBS output is {cfg.range_label}. If this doesn’t match what the source device sends, blacks look grey or crushed.",
                                 steps=[f"Double-click “{d['name']}” → Color Range → Default, unless you have a reason to force it.",
-                                       "Match the console’s RGB range setting (PS5: Screen and Video → RGB Range → Automatic/Limited)."]))
+                                       "Or match the source device’s own RGB range setting (for example PS5: Settings → Screen and Video → Video Output → RGB Range)."]))
         # screen captures vs HDR desktop
         hdr_desktop = log and any("G2084" in x.get("space", "") for x in log.displays)
         if hdr_desktop and not hdr_space:
@@ -559,17 +596,21 @@ def preflight_rules(cfg: obs_config.ObsConfig, log: Optional[obs_log.ObsLog]) ->
                 A.append(Advice("pf-forcesdr", "tip", P, "Windows HDR is on — PC captures may look washed out",
                                 f"These captures don’t have “Force SDR” ticked: {', '.join(bad[:5])}{'…' if len(bad) > 5 else ''}. "
                                 "Ignore this if you only record your capture card.",
-                                steps=["Double-click the capture → tick “Force SDR”, or turn Windows HDR off while recording PC games."]))
+                                steps=["Display Capture / Window Capture: double-click it → tick “Force SDR”.",
+                                       "Game Capture has no Force SDR box. If an HDR game looks wrong in the recording, double-click it and check Color Space "
+                                       "(sRGB for a normal SDR recording).",
+                                       "Or turn Windows HDR off while recording PC games: Windows Settings → System → Display → Use HDR."]))
         # format / encoder
         fmt = (cfg.rec_format or "").lower()
         if fmt in ("mp4", "mov"):
-            A.append(Advice("pf-mp4", "warning", P, f"Recording format is {fmt.upper()}",
-                            "If OBS, Windows or the drive crashes, an MP4/MOV file can be lost completely.",
-                            steps=["Settings → Output → Recording → Recording Format → Matroska Video (.mkv) or Hybrid MP4."]))
+            A.append(Advice("pf-mp4", "tip", P, f"Recording format is {fmt.upper()}",
+                            "Only matters if something crashes: a plain MP4/MOV that isn’t finished properly can’t be opened.",
+                            steps=[cfg.rec_format_setting() + " → Hybrid MP4 (if listed) or Matroska Video (.mkv)."]))
         enc_name = (cfg.rec_encoder or "").lower()
         if "x264" in enc_name and cfg.output_res and int(cfg.output_res.split("x")[0] or 0) >= 2560:
             A.append(Advice("pf-x264", "warning", P, "CPU encoding (x264) at high resolution",
-                            "Very likely to cause encoding lag.", steps=["Switch the recording encoder to NVIDIA NVENC (HEVC or AV1)."]))
+                            "Very likely to cause encoding lag at this resolution.",
+                            steps=[cfg.enc_path("Video Encoder") + " → your graphics card’s hardware encoder (NVIDIA NVENC, AMD AMF/VCE or Intel QuickSync)."]))
         preset = str(es.get("preset2") or es.get("preset") or "").lower()
         big = cfg.output_res and int((cfg.output_res.split("x")[0] or 0)) >= 2560 and cfg.fps >= 59
         heavy = []
@@ -579,16 +620,19 @@ def preflight_rules(cfg: obs_config.ObsConfig, log: Optional[obs_log.ObsLog]) ->
             heavy.append("Multipass full resolution")
         if es.get("lookahead"):
             heavy.append("Look-ahead")
+        last_rec = log.recordings[-1] if (log and log.recordings) else None
+        had_skips = bool(last_rec and last_rec.encode_skipped)
         if heavy and big:
-            A.append(Advice("pf-heavy", "warning", P, "Encoder settings are heavy for " + f"{cfg.output_res} @ {cfg.fps:g}",
-                            "These raise the chance of encoding lag: " + ", ".join(heavy) + ".",
-                            steps=["Settings → Output → Recording → use Preset P4 or faster, Multipass Quarter/Single, Look-ahead off."]))
+            A.append(Advice("pf-heavy", "warning" if had_skips else "tip", P, "Encoder settings are heavy for " + f"{cfg.output_res} @ {cfg.fps:g}",
+                            ("Your last recording had encoding skips, and these settings are a likely reason: " if had_skips else
+                             "No skips so far, so this is only a heads-up. If skips show up, these are the first things to lighten: ") + ", ".join(heavy) + ".",
+                            steps=[cfg.enc_path("Preset") + " → P4 or faster; Multipass Mode → Quarter Resolution or Single Pass; Look-ahead → off."]))
         if cfg.base_res and cfg.output_res and cfg.base_res != cfg.output_res:
             A.append(Advice("pf-scale", "tip", P, f"OBS scales {cfg.base_res} → {cfg.output_res}",
                             "Scaling costs GPU time every frame.", steps=["Settings → Video → Downscale Filter → Bicubic if you see rendering lag."]))
         if cfg.rec_rescale:
             A.append(Advice("pf-rescale", "tip", P, f"Recording rescale is on ({cfg.rec_rescale_res})", "An extra scaling pass per frame.",
-                            steps=["Settings → Output → Recording → untick Rescale Output unless you need it."]))
+                            steps=[cfg.enc_path("Rescale Output") + " → untick it unless you need it."]))
         if cfg.browser_sources >= 6:
             A.append(Advice("pf-browser", "tip", P, f"{cfg.browser_sources} browser sources in this scene collection",
                             "Each one is a small web browser using CPU/GPU.", steps=["Tick “Shutdown source when not visible” on widgets, remove unused ones."]))
@@ -607,7 +651,7 @@ def preflight_rules(cfg: obs_config.ObsConfig, log: Optional[obs_log.ObsLog]) ->
                                 "Network shares pause unpredictably.", steps=["Record to a local SSD and move files afterwards."]))
             elif d.get("bus", "").upper() == "USB":
                 A.append(Advice("pf-usb", "tip", P, f"Recording to a USB drive {d.get('letter')} {desc}",
-                                "Usually OK, but USB enclosures can stall. I’ll watch its write latency while you record."))
+                                "Usually OK, but some USB drives stall. While watching is on, the app tracks its write speed and warns you if it falls behind."))
             if free is not None and free < 50:
                 A.append(Advice("pf-space", "warning" if free < 20 else "tip", P, f"Only {free:.0f} GB free on the recording drive",
                                 "4K60 HEVC can use 40–80 GB per hour.", steps=["Free up space or pick another drive before long sessions."]))
@@ -615,23 +659,13 @@ def preflight_rules(cfg: obs_config.ObsConfig, log: Optional[obs_log.ObsLog]) ->
                 A.append(Advice("pf-space-ok", "good", P, f"Recording drive {d.get('letter') or ''} has {free:,.0f} GB free"))
             if not os.path.isdir(cfg.rec_path) and sys.platform == "win32":
                 A.append(Advice("pf-path", "critical", P, "Recording folder doesn’t exist", f"{cfg.rec_path} was not found — is the drive connected?",
-                                steps=["Connect the drive or change Settings → Output → Recording Path."]))
+                                steps=["Connect the drive, or change " + cfg.rec_path_setting() + "."]))
     # from the log
     if log:
         if log.system.get("admin", "").lower() == "false":
             A.append(Advice("pf-admin", "tip", P, "Run OBS as administrator",
                             "Lets OBS raise its GPU priority so games can’t starve it.",
                             steps=["Close OBS → right-click its shortcut → Properties → Compatibility → Run this program as an administrator."]))
-        devs = {}
-        for d in log.devices:
-            devs[d.name] = d
-        for d in devs.values():
-            if d.sample_rate and log.audio_rate and d.sample_rate != log.audio_rate:
-                A.append(Advice(f"pf-rate-{d.name}", "warning", P, f"Audio sample-rate mismatch on “{d.name}” ({d.sample_rate} vs {log.audio_rate} Hz)",
-                                "Resampling can cause crackles and audio drift on long recordings.",
-                                steps=[f"Double-click “{d.name}” → Audio Output Mode / audio device → use 48 kHz if available.",
-                                       "Or OBS → Settings → Audio → Sample Rate to match the device.",
-                                       "Windows: Sound settings → the capture card’s audio device → Properties → Advanced → 48000 Hz."]))
         if log.last_ts and log.first_ts and (log.last_ts - log.first_ts) > timedelta(hours=12):
             A.append(Advice("pf-uptime", "tip", P, f"OBS has been open for {(log.last_ts - log.first_ts).total_seconds() / 3600:.0f} hours",
                             "Restarting OBS before a long session clears built-up memory and audio buffering.", steps=["Close and reopen OBS."]))
@@ -639,7 +673,7 @@ def preflight_rules(cfg: obs_config.ObsConfig, log: Optional[obs_log.ObsLog]) ->
         if last and last.encode_skipped:
             pct = 100 * last.encode_skipped / max(last.encode_total or 1, 1)
             A.append(Advice("pf-history", "status", P, f"Last recording had {last.encode_skipped:,} encoding skips ({pct:.2f}%)",
-                            "Monitoring is on this time, so I can tell you what caused them."))
+                            "While watching is on, the app will show what caused them."))
     if cfg.found:
         es = cfg.encoder_settings or {}
         summary = (f"{cfg.output_res or cfg.base_res} @ {cfg.fps_label} fps · {cfg.color_format} · {cfg.space_label} · {cfg.range_label} range · "
@@ -647,7 +681,7 @@ def preflight_rules(cfg: obs_config.ObsConfig, log: Optional[obs_log.ObsLog]) ->
                    f"{str(es.get('rate_control') or '')} {('CQ ' + str(es.get('cqp'))) if es.get('cqp') else ''} · {(cfg.rec_format or '').upper()} → {cfg.rec_path}")
         bad = [a for a in A if a.severity in ("critical", "warning")]
         A.insert(0, Advice("pf-summary", "good" if not bad else "status", P,
-                           "Pre-flight check: " + ("settings look good" if not bad else f"{len(bad)} thing(s) to fix before you record"),
+                           "OBS settings check: " + ("settings look good" if not bad else f"{len(bad)} thing(s) to fix before you record"),
                            f"Profile “{cfg.profile}”: {summary}"))
     return A
 
@@ -659,7 +693,7 @@ def after_tips(cfg, skips) -> list:
         out.append(Advice("after-remux", "tip", "after", "Editing? Remux the MKV first",
                           "Most editors prefer MP4. Remuxing is lossless and takes seconds.",
                           steps=["OBS → File → Remux Recordings → pick the file → Remux.",
-                                 "Or turn on Settings → Advanced → Recording → “Automatically remux to MP4”."]))
+                                 "Or have OBS do it for you: Settings → Advanced → Recording → tick “Automatically remux to MP4”."]))
     if skips:
         out.append(Advice("after-deep", "tip", "after", "Run a deep scan to see the skips in the video",
                           "The deep scan finds repeated/frozen frames and their exact positions, so you can check them in your editor.",
@@ -678,7 +712,7 @@ def quick_file_check(path: str, cfg) -> list:
                            timeout=30, creationflags=CREATE_NO_WINDOW)
         info = json.loads(r.stdout or "{}")
     except Exception:
-        return [Advice("fcheck-fail", "tip", "during", "Couldn’t read the file yet — I’ll check it after you stop.")]
+        return [Advice("fcheck-fail", "tip", "during", "Couldn’t read the file yet — it will be checked after you stop.")]
     vs = [s for s in info.get("streams", []) if s.get("codec_type") == "video"]
     aus = [s for s in info.get("streams", []) if s.get("codec_type") == "audio"]
     if not vs:
