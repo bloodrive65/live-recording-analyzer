@@ -51,9 +51,10 @@ jobs:
       - name: Self-test the built app
         shell: pwsh
         run: |
-          $p = Start-Process -FilePath "dist\OBS Session Analyzer\OBS Session Analyzer.exe" -ArgumentList "--selftest", "$PWD\selftest.txt" -Wait -PassThru
+          Start-Process -FilePath "dist\OBS Session Analyzer\OBS Session Analyzer.exe" -ArgumentList "--selftest", "`"$PWD\selftest.txt`"" -Wait
           Get-Content selftest.txt
-          if ($p.ExitCode -ne 0) { exit 1 }
+          if (-not (Select-String -Path selftest.txt -Pattern '^OK$' -Quiet)) { exit 1 }
+          exit 0
 
       - name: Build installer (Inno Setup)
         shell: pwsh
