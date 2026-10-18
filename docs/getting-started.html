@@ -82,13 +82,14 @@
 <li>Click <b>Check OBS settings</b>. A progress bar shows while it reads OBS, then the results appear in the <b>Advisor</b>. Fix anything marked <span class="pill" style="color:var(--bad)">CRITICAL</span> or <span class="pill" style="color:var(--warn)">WARNING</span>.</li>
 <li>Click <b>Start watching</b>, then minimize the window. The app stays in the system tray.</li>
 <li>Start recording in OBS and play.</li>
-<li>Stop recording. A few seconds later the Advisor says “Analyzing the recording…”, then shows a summary with an <b>Open report</b> button. Everything happens on your PC; nothing is uploaded. The report is saved in Documents\Live Recording Analyzer\Reports and opens in your web browser.</li>
+<li>Stop recording. If automatic analysis is on (you choose this in the last step of guided setup), the app analyzes the recording within about a minute and shows a Windows pop-up. Otherwise open the <b>Analyzer</b> tab and click <b>Analyze my last recording</b>. The analysis runs on your PC.</li>
+<li>Click <b>Open report</b> on the <b>Analyzer</b> tab. The report opens in your web browser on <a href="report.html">this website’s report page</a>. The report is stored inside the link itself, so nothing is uploaded, and the result stays on the Analyzer tab until you analyze again.</li>
 <li>If you changed OBS settings since your previous recording, a second message compares the two (encoding skips and rendering lag) and says whether the change helped.</li>
 </ol>
 <p>Next: <a href="using-the-app.html">Using the app</a>, which covers every tab and button.</p>
 
 <h2 id="uninstall">Update or uninstall</h2>
-<p><b>Update:</b> download the newest installer and run it. Your settings, sessions and reports stay in <span class="path">Documents\Live Recording Analyzer</span>.</p>
+<p><b>Update:</b> starting with 1.3.0, the app checks for updates when it opens and asks before installing (Settings → Updates also has <b>Check for updates now</b>). Click <b>Update now</b> and it downloads the installer, closes, updates and reopens by itself. On 1.2.1 or older, download the newest installer and run it once. Your settings, sessions and reports stay in <span class="path">Documents\Live Recording Analyzer</span>.</p>
 <p><b>Uninstall:</b> go to <span class="path">Windows Settings → Apps → Installed apps → Live Recording Analyzer → Uninstall</span>. Your reports in Documents are kept, so delete that folder too if you don't want them.</p>
 </article></div></main>
 <footer><div class="wrap">

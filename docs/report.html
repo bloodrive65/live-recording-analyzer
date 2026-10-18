@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Recording report · Live Recording Analyzer</title>
+<meta name="description" content="A recording report from Live Recording Analyzer.">
+<meta property="og:title" content="Recording report · Live Recording Analyzer"><meta property="og:description" content="Skipped frames, likely causes and fixes for an OBS recording.">
+<meta property="og:image" content="https://bloodrive65.github.io/live-recording-analyzer/assets/logo-512.png">
+<link rel="icon" href="assets/logo.svg" type="image/svg+xml"><link rel="icon" href="assets/favicon-32.png" sizes="32x32">
+<link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&family=Sora:wght@600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/site.css"><link rel="stylesheet" href="assets/report.css"><meta name="robots" content="noindex">
+</head><body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="top"><div class="wrap">
+<a class="brand" href="index.html"><img src="assets/logo.svg" alt="" width="32" height="32">Live Recording Analyzer</a>
+<button class="menu-btn" aria-label="Menu" aria-expanded="false" aria-controls="nav">&#9776;</button>
+<nav class="nav" id="nav" aria-label="Main"><a href="index.html">Home</a><a href="getting-started.html">Getting started</a><a href="using-the-app.html">Using the app</a><a href="problems-explained.html">Problems explained</a><a href="faq.html">FAQ & fixes</a><a href="releases.html">Releases</a></nav>
+</div></header>
+<main id="main"><div class="wrap rp">
+<div id="rp-loading" class="rp-state"><div class="rp-spin" aria-hidden="true"></div><p>Opening the report…</p></div>
+<div id="rp-empty" class="rp-state" hidden>
+<h1>Recording report</h1>
+<p>This page shows reports from the Live Recording Analyzer app. Open one from the app: <b>Analyzer → Open report</b>, or <b>OBS Reports → Open</b>.</p>
+<p class="muted">The report is stored inside the link itself (the part after “#”), which browsers never send to a server. If you got here without a long link, there’s nothing to show.</p>
+<p><a class="btn" href="getting-started.html">Get the app</a></p>
+</div>
+<div id="rp-error" class="rp-state" hidden><h1>This report link is incomplete</h1><p>It may have been cut off when it was copied. In the app, use <b>Copy link</b> again and paste the whole thing.</p></div>
+<article id="rp" hidden></article>
+</div></main>
+<footer><div class="wrap">
+<div>Live Recording Analyzer is free and runs entirely on your PC.<br>It is an independent project and is not made by, affiliated with, or endorsed by the OBS Project. “OBS” and “OBS Studio” are used only to describe compatibility.</div>
+<div><a href="https://github.com/bloodrive65/live-recording-analyzer">Source code on GitHub</a> · <a href="https://github.com/bloodrive65/live-recording-analyzer/issues">Report a problem</a> · <a href="releases.html">Releases</a></div>
+</div></footer>
+<script src="assets/site.js" defer></script>
+<script src="assets/report.js" defer></script>
+</body></html>

@@ -17,11 +17,24 @@
 <button class="menu-btn" aria-label="Menu" aria-expanded="false" aria-controls="nav">&#9776;</button>
 <nav class="nav" id="nav" aria-label="Main"><a href="index.html">Home</a><a href="getting-started.html">Getting started</a><a href="using-the-app.html">Using the app</a><a href="problems-explained.html">Problems explained</a><a href="faq.html">FAQ & fixes</a><a href="releases.html" aria-current=page>Releases</a></nav>
 </div></header>
-<main id="main"><div class="wrap page"><aside class="toc" aria-label="On this page"><b>ON THIS PAGE</b><a href="#v121">1.2.1</a><a href="#v120">1.2.0</a><a href="#v110">1.1.0</a><a href="#which">Which file?</a></aside><article class="doc">
+<main id="main"><div class="wrap page"><aside class="toc" aria-label="On this page"><b>ON THIS PAGE</b><a href="#v130">1.3.0</a><a href="#v121">1.2.1</a><a href="#v120">1.2.0</a><a href="#v110">1.1.0</a><a href="#which">Which file?</a></aside><article class="doc">
 <h1>Releases</h1>
 <p class="intro">Always get the newest version from <a href="https://github.com/bloodrive65/live-recording-analyzer/releases/latest">the latest release on GitHub</a>. Installers are built automatically from the public source code.</p>
 
-<div class="rel" id="v121"><header><h2>1.2.1</h2><span class="pill" style="color:var(--ok)">LATEST</span><span class="date">October 2026</span></header>
+<div class="rel" id="v130"><header><h2>1.3.0</h2><span class="pill" style="color:var(--ok)">LATEST</span><span class="date">October 2026</span></header>
+<ul>
+<li><b>Analyzer tab:</b> shows your latest recording and analyzes it with one click. The report no longer opens by itself, which caused the window to flicker and minimize.</li>
+<li><b>The report stays available:</b> the last result and its <b>Open report</b> button stay on the Analyzer tab, even after a restart, until you analyze again.</li>
+<li><b>Online report page:</b> <b>Open report</b> shows the report on <a href="report.html">this website</a>. The report is stored inside the link, so nothing is uploaded, it works on any device, and <b>Copy link</b> lets you share it. <b>Open saved copy</b> works offline.</li>
+<li><b>OBS Reports tab</b> (was Reports): all saved reports, plus analyzing older recordings from any OBS log.</li>
+<li><b>Automatic or manual analysis</b> is now a choice in the last step of guided setup.</li>
+<li><b>Fixed:</b> the guided-setup question stopped appearing after setup was finished once, even without <b>Remember my choice</b>. It now appears every time unless you tick it.</li>
+<li><b>Built-in updater:</b> checks for new versions, shows what's new, and asks before downloading. It then installs and reopens the app. Install 1.3.0 manually once; later versions can update from inside the app.</li>
+<li>New app icon.</li>
+</ul>
+<div class="dl"><a class="btn primary" href="https://github.com/bloodrive65/live-recording-analyzer/releases/tag/v1.3.0">Download 1.3.0</a></div></div>
+
+<div class="rel" id="v121"><header><h2>1.2.1</h2><span class="date">October 2026</span></header>
 <ul>
 <li><b>Fixed:</b> the app could close by itself right when the automatic analysis finished after a recording. Any future error is saved to <b>crash.log</b> in Documents\Live Recording Analyzer, and the app tells you about it the next time it opens.</li>
 <li><b>Settings changes are noticed:</b> while watching, if you change something in OBS (for example the encoder Preset), the Advisor lists what changed, what it should do, and when it takes effect.</li>

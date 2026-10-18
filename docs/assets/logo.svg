@@ -1,7 +1,19 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
-<rect x="48" y="48" width="928" height="928" rx="200" fill="#D5D9DF" stroke="#8E959F" stroke-width="18"/>
-<path d="M150 560 H330 L400 385 L480 720 L560 300 L625 560 H870" fill="none" stroke="#2F3B14" stroke-width="104" stroke-linecap="round" stroke-linejoin="round"/>
-<path d="M150 560 H330 L400 385 L480 720 L560 300 L625 560 H870" fill="none" stroke="#7FD11B" stroke-width="72" stroke-linecap="round" stroke-linejoin="round"/>
-<circle cx="810" cy="220" r="62" fill="none" stroke="#4A515C" stroke-width="58"/>
-<circle cx="810" cy="220" r="62" fill="none" stroke="#FFFFFF" stroke-width="32"/>
+<defs>
+  <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0" stop-color="#2a2a30"/><stop offset=".45" stop-color="#1e1e22"/><stop offset="1" stop-color="#16161a"/>
+  </linearGradient>
+  <linearGradient id="line" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0" stop-color="#D9FF7A"/><stop offset=".45" stop-color="#8CFF1F"/><stop offset="1" stop-color="#3FCC00"/>
+  </linearGradient>
+  <filter id="glow" x="-20%" y="-30%" width="140%" height="160%">
+    <feGaussianBlur stdDeviation="34"/>
+  </filter>
+</defs>
+<rect x="40" y="40" width="944" height="944" rx="204" fill="url(#bg)" stroke="#3a3a42" stroke-width="14"/>
+<path d="M150 560 H330 L400 385 L480 720 L560 300 L625 560 H870" fill="none" stroke="#6CFF00" stroke-opacity=".75" stroke-width="120" stroke-linecap="round" stroke-linejoin="round" filter="url(#glow)"/>
+<path d="M150 560 H330 L400 385 L480 720 L560 300 L625 560 H870" fill="none" stroke="#123d00" stroke-width="100" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M150 560 H330 L400 385 L480 720 L560 300 L625 560 H870" fill="none" stroke="url(#line)" stroke-width="76" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M150 548 H330 L400 373 L480 708 L560 288 L625 548 H870" fill="none" stroke="#F4FFE0" stroke-opacity=".55" stroke-width="16" stroke-linecap="round" stroke-linejoin="round"/>
+<circle cx="810" cy="220" r="62" fill="none" stroke="#FFFFFF" stroke-width="34"/>
 </svg>

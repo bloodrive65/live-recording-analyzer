@@ -17,9 +17,9 @@
 <button class="menu-btn" aria-label="Menu" aria-expanded="false" aria-controls="nav">&#9776;</button>
 <nav class="nav" id="nav" aria-label="Main"><a href="index.html">Home</a><a href="getting-started.html">Getting started</a><a href="using-the-app.html" aria-current=page>Using the app</a><a href="problems-explained.html">Problems explained</a><a href="faq.html">FAQ & fixes</a><a href="releases.html">Releases</a></nav>
 </div></header>
-<main id="main"><div class="wrap page"><aside class="toc" aria-label="On this page"><b>ON THIS PAGE</b><a href="#live">Live tab</a><a href="#advisor">Advisor messages</a><a href="#buttons">Message buttons</a><a href="#analyze">Analyze tab</a><a href="#report">The report</a><a href="#deep">Deep scan</a><a href="#settings">Settings tab</a><a href="#data">Where files are saved</a></aside><article class="doc">
+<main id="main"><div class="wrap page"><aside class="toc" aria-label="On this page"><b>ON THIS PAGE</b><a href="#live">Live tab</a><a href="#advisor">Advisor messages</a><a href="#buttons">Message buttons</a><a href="#analyzer">Analyzer tab</a><a href="#obsreports">OBS Reports tab</a><a href="#report">The report</a><a href="#deep">Deep scan</a><a href="#settings">Settings tab</a><a href="#data">Where files are saved</a></aside><article class="doc">
 <h1>Using the app</h1>
-<p class="intro">The app has five tabs: <b>Live</b>, <b>Analyze</b>, <b>Reports</b>, <b>Settings</b> and <b>Help</b>. Most of the time you only need Live.</p>
+<p class="intro">The app has five tabs: <b>Live</b>, <b>Analyzer</b>, <b>OBS Reports</b>, <b>Settings</b> and <b>Help</b>. Most of the time you only need Live and Analyzer.</p>
 
 <h2 id="live">Live tab</h2>
 <p>The banner at the top shows what's happening right now:</p>
@@ -50,23 +50,33 @@
 <ul>
 <li><b>Show what to do / Hide steps</b> shows or hides numbered steps that point to the exact OBS or Windows setting.</li>
 <li><b>Pause recording / Resume recording</b> pauses OBS so you can fix something without starting a new file. This only works while connected to OBS.</li>
-<li><b>Open report</b> opens the full report in your web browser.</li>
+<li><b>Open report</b> opens the full report in your web browser. <b>Copy link</b> copies the report link so you can open it on another device or send it to someone.</li>
 <li><b>Run deep scan</b> scans the whole video frame by frame. See <a href="#deep">Deep scan</a>.</li>
 <li><b>Locate file / Browse for log</b> appears when the app couldn't find a recording or OBS log, so you can point it to the right file.</li>
 <li><b>Dismiss</b> removes the message.</li>
 </ul>
 
-<h2 id="analyze">Analyze tab</h2>
-<p>Use this to check older recordings, or recordings made without watching turned on.</p>
+<h2 id="analyzer">Analyzer tab</h2>
+<p>This tab is about your most recent recording. It shows the file name, when it started, its length and size, the OBS log it came from, and whether the app was watching at the time. If it wasn't, the analysis still checks the OBS log and the file. Turn on watching before your next recording to also see what the PC was doing at each problem.</p>
 <ol class="steps">
-<li>Choose an OBS log. The newest ones are listed automatically. They are also in OBS under <span class="path">Help → Log Files → Show Log Files</span>.</li>
-<li>Tick the recordings you want to check. If a file has been moved, click <b>Locate</b> to point to it.</li>
-<li>If you had watching turned on during that recording, choose its session so the report can show what the PC was doing.</li>
-<li>Click <b>Analyze</b>. To check a video without a log, use <b>Check a video file only</b>.</li>
+<li>Click <b>Analyze my last recording</b>. Tick <b>Deep scan</b> first if you want a frame-by-frame check (see <a href="#deep">Deep scan</a>). A progress bar shows each step, and <b>Cancel</b> stops it.</li>
+<li>The <b>Last report</b> box shows the verdict, the comparison with your previous recording, and the top findings.</li>
+<li><b>Open report</b> shows the full report in your browser. <b>Copy link</b> copies its link. <b>Open saved copy</b> opens the copy saved on this PC, which works offline.</li>
+</ol>
+<p>The Last report box stays, even after you close and reopen the app, until you analyze again. Nothing opens by itself.</p>
+
+<h2 id="obsreports">OBS Reports tab</h2>
+<p><b>Saved reports</b> lists every report you've made, newest first. Double-click one to open it, or use <b>Open report</b>, <b>Copy link</b>, <b>Open saved copy</b>, <b>Reports folder</b> or <b>Delete</b>.</p>
+<p><b>Analyze an older recording from an OBS log</b> is for recordings that aren't the latest one:</p>
+<ol class="steps">
+<li>Choose an OBS log. OBS writes a new one each time it opens; the newest are listed automatically. They are also in OBS under <span class="path">Help → Log Files → Show Log Files</span>.</li>
+<li>Tick the recordings you want to check. If a file has been moved, double-click its row to point to it.</li>
+<li><b>Watching data</b> is picked automatically when the app was watching during that recording.</li>
+<li>Click <b>Analyze selected</b>. The result appears on the Analyzer tab. To check a video without a log, use <b>Check a video file only</b>.</li>
 </ol>
 
 <h2 id="report">The report</h2>
-<p>Reports open in your web browser and are saved as single HTML files you can keep or share. They contain:</p>
+<p>Reports open in your web browser on <a href="report.html">this website’s report page</a>. The whole report is packed into the link, after the “#”. Browsers never send that part to a server, so GitHub never receives your report; the page simply unpacks it in your browser. That means a report link works on any device, including your phone, and anyone you send it to can see it. Folder names are left out. Each report is also saved on your PC as a single HTML file that works offline. Reports contain:</p>
 <ul>
 <li><b>Verdict and key findings</b>, each with why it matters and how to fix it</li>
 <li><b>Timeline</b> of every incident, with clock time and video position, plus the likely cause based on what the PC was doing at that second</li>
@@ -85,15 +95,16 @@
 <li><b>OBS connection:</b> a live status light (Connected, OBS not running, WebSocket off, or Password rejected) with a <b>Check again</b> button. The port and password are filled in from OBS automatically.</li>
 <li><b>Alerts while you play:</b> pop-ups for critical problems only, for warnings and critical (recommended), or off, plus an optional sound. Pop-ups are limited to one every 30 seconds, except critical ones.</li>
 <li><b>Resource use:</b> Normal checks once per second, and Light checks every 2 seconds and collects less detail.</li>
-<li><b>Behavior:</b> start watching when the app opens, keep running in the tray, and analyze automatically when a recording stops.</li>
-<li><b>Run guided setup</b> starts the setup walkthrough again.</li>
+<li><b>Behavior:</b> start watching when the app opens, keep running in the tray, and analyze automatically when a recording stops (turn this off to click Analyze yourself).</li>
+<li><b>Guided setup:</b> <b>Run guided setup</b> starts the walkthrough again. <b>Ask about guided setup when the app opens</b> brings back the question if you ticked Remember my choice.</li>
+<li><b>Updates:</b> shows your version, checks for updates when the app opens (you can turn this off), and has <b>Check for updates now</b>. Updates always ask first.</li>
 </ul>
 
 <h2 id="data">Where files are saved</h2>
 <p>Everything is in <span class="path">Documents\Live Recording Analyzer</span>:</p>
 <ul>
 <li><b>Sessions</b> holds per-second PC data from each watching session. It's small: about 1–2 MB per hour.</li>
-<li><b>Reports</b> holds the HTML reports.</li>
+<li><b>Reports</b> holds the saved reports (HTML) and a small file with each report's link.</li>
 <li><b>settings.json</b> holds your choices.</li>
 </ul>
 </article></div></main>

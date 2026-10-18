@@ -2,7 +2,7 @@
 #define AppExe "Live Recording Analyzer.exe"
 #define OldName "OBS Session Analyzer"
 #ifndef AppVersion
-  #define AppVersion "1.2.1"
+  #define AppVersion "1.3.0"
 #endif
 
 [Setup]
@@ -59,6 +59,8 @@ Name: "{userstartup}\{#AppName}"; Filename: "{app}\{#AppExe}"; Parameters: "--mi
 
 [Run]
 Filename: "{app}\{#AppExe}"; Description: "Open {#AppName} now"; Flags: nowait postinstall skipifsilent
+; After an in-app update (silent install), open the app again by itself.
+Filename: "{app}\{#AppExe}"; Parameters: "--updated"; Flags: nowait; Check: WizardSilent
 
 [Code]
 function PrepareToInstall(var NeedsRestart: Boolean): String;
