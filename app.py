@@ -1,0 +1,1305 @@
+"""OBS Session Analyzer — desktop app."""
+from __future__ import annotations
+
+import json
+import queue
+import os
+import sys
+import threading
+import time
+import traceback
+import webbrowser
+from datetime import datetime, timedelta
+
+from PySide6.QtCore import Qt, QTimer, QThread, Signal, QUrl, QSize
+from PySide6.QtGui import QIcon, QAction, QDesktopServices, QFont, QColor, QPalette
+from PySide6.QtWidgets import (
+    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QPushButton,
+    QTabWidget, QComboBox, QFileDialog, QCheckBox, QLineEdit, QSpinBox, QProgressBar, QTreeWidget,
+    QTreeWidgetItem, QMessageBox, QFrame, QSystemTrayIcon, QMenu, QListWidget, QListWidgetItem,
+    QTextBrowser, QSizePolicy, QHeaderView, QAbstractItemView, QScrollArea,
+)
+
+from analyzer import obs_log, analyze, report
+from analyzer.monitor import Monitor
+from analyzer.obsws import ObsClient, obs_ws_config
+from analyzer.live import LiveAdvisor, Advice
+from analyzer.analyze import fmt_t
+
+APP_NAME = "OBS Session Analyzer"
+VERSION = "1.1.0"
+
+
+def resource(name):
+    base = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
+    return os.path.join(base, "assets", name)
+
+
+def docs_dir():
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            from ctypes import wintypes
+            buf = ctypes.create_unicode_buffer(wintypes.MAX_PATH)
+            ctypes.windll.shell32.SHGetFolderPathW(None, 5, None, 0, buf)  # CSIDL_PERSONAL
+            if buf.value:
+                return os.path.join(buf.value, APP_NAME)
+        except Exception:
+            pass
+    return os.path.join(os.path.expanduser("~"), "Documents", APP_NAME)
+
+
+DATA = docs_dir()
+SESSIONS = os.path.join(DATA, "Sessions")
+REPORTS = os.path.join(DATA, "Reports")
+SETTINGS_FILE = os.path.join(DATA, "settings.json")
+for d in (SESSIONS, REPORTS):
+    os.makedirs(d, exist_ok=True)
+
+
+def load_settings():
+    try:
+        with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def save_settings(s):
+    try:
+        with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
+            json.dump(s, f, indent=2)
+    except Exception:
+        pass
+
+
+STYLE = """
+* { font-family: 'Segoe UI', sans-serif; font-size: 10pt; }
+QMainWindow, QWidget { background: #0f1115; color: #e7e9ee; }
+QTabWidget::pane { border: none; }
+QTabBar::tab { background: transparent; color: #9aa3b2; padding: 10px 18px; margin-right: 4px; border-bottom: 2px solid transparent; font-weight: 600; }
+QTabBar::tab:selected { color: #ffffff; border-bottom: 2px solid #d64545; }
+QTabBar::tab:hover { color: #ffffff; }
+QFrame#card { background: #171a21; border: 1px solid #2a2f3a; border-radius: 10px; }
+QLabel#h1 { font-size: 17pt; font-weight: 700; }
+QLabel#h2 { font-size: 12pt; font-weight: 650; }
+QLabel#muted { color: #9aa3b2; }
+QLabel#tileK { color: #9aa3b2; font-size: 8.5pt; font-weight: 600; }
+QLabel#tileV { font-size: 17pt; font-weight: 650; }
+QPushButton { background: #232834; border: 1px solid #343b49; border-radius: 7px; padding: 7px 14px; color: #e7e9ee; }
+QPushButton:hover { background: #2b3140; }
+QPushButton:disabled { color: #6b7280; background: #1a1d24; }
+QPushButton#primary { background: #c23b3b; border: 1px solid #d64545; font-weight: 700; font-size: 11pt; padding: 10px 22px; }
+QPushButton#primary:hover { background: #d64545; }
+QPushButton#stop { background: #3a3f4b; border: 1px solid #555c6b; font-weight: 700; font-size: 11pt; padding: 10px 22px; }
+QLineEdit, QComboBox, QSpinBox { background: #1d212a; border: 1px solid #343b49; border-radius: 6px; padding: 5px 8px; color: #e7e9ee; }
+QComboBox QAbstractItemView { background: #1d212a; color: #e7e9ee; selection-background-color: #c23b3b; }
+QTreeWidget, QListWidget, QTextBrowser { background: #171a21; border: 1px solid #2a2f3a; border-radius: 8px; color: #e7e9ee; }
+QHeaderView::section { background: #1d212a; color: #9aa3b2; border: none; padding: 6px; font-weight: 600; }
+QTreeWidget::item, QListWidget::item { padding: 4px; }
+QTreeWidget::item:selected, QListWidget::item:selected { background: #3a2226; }
+QProgressBar { background: #1d212a; border: 1px solid #343b49; border-radius: 6px; text-align: center; color: #e7e9ee; height: 18px; }
+QProgressBar::chunk { background: #c23b3b; border-radius: 5px; }
+QLabel, QCheckBox { background: transparent; }
+QCheckBox { spacing: 8px; }
+QCheckBox::indicator { width: 16px; height: 16px; border: 1px solid #555c6b; border-radius: 4px; background: #1d212a; }
+QCheckBox::indicator:checked { background: #c23b3b; border: 1px solid #d64545; image: url(CHECK_SVG); }
+QCheckBox::indicator:hover { border: 1px solid #8a93a5; }
+QScrollBar:vertical { background: transparent; width: 10px; margin: 0; }
+QScrollBar::handle:vertical { background: #343b49; border-radius: 5px; min-height: 30px; }
+QScrollBar::handle:vertical:hover { background: #4a5263; }
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
+QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: transparent; }
+QScrollArea#feed { border: none; background: transparent; }
+QWidget#feedInner { background: transparent; }
+QLabel#advT { font-size: 11pt; font-weight: 650; }
+QLabel#steps { color: #cfd5df; background: #12151b; border-radius: 6px; padding: 8px 10px; }
+QPushButton#link { background: transparent; border: none; color: #8fb8ff; padding: 2px 4px; }
+QPushButton#link:hover { color: #c4d9ff; text-decoration: underline; }
+QPushButton#act { background: #2a2030; border: 1px solid #5a3a46; padding: 5px 12px; }
+QPushButton#act:hover { background: #3a2a3e; }
+QStatusBar { color: #9aa3b2; }
+"""
+
+
+def card():
+    f = QFrame()
+    f.setObjectName("card")
+    return f
+
+
+def label(text="", obj=None, wrap=False):
+    l = QLabel(text)
+    if obj:
+        l.setObjectName(obj)
+    if wrap:
+        l.setWordWrap(True)
+    return l
+
+
+class Tile(QFrame):
+    def __init__(self, title):
+        super().__init__()
+        self.setObjectName("card")
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(14, 10, 14, 10)
+        self.k = label(title.upper(), "tileK")
+        self.v = label("—", "tileV")
+        self.s = label("", "muted")
+        lay.addWidget(self.k)
+        lay.addWidget(self.v)
+        lay.addWidget(self.s)
+
+    def set(self, value, sub="", warn=False, bad=False):
+        self.v.setText(value)
+        self.s.setText(sub)
+        color = "#ff5d5d" if bad else ("#f5b748" if warn else "#e7e9ee")
+        self.v.setStyleSheet(f"color:{color}")
+
+
+SEV = {"critical": ("#ff5d5d", "CRITICAL"), "warning": ("#f5b748", "WARNING"), "tip": ("#5fa8ff", "TIP"),
+       "good": ("#3ecf8e", "GOOD"), "status": ("#9aa3b2", "STATUS"), "request": ("#c08cff", "NEEDS YOU")}
+PHASE = {"before": "Before recording", "during": "During recording", "after": "After recording"}
+
+
+class AdviceCard(QFrame):
+    def __init__(self, a, on_action, on_dismiss):
+        super().__init__()
+        self.on_action, self.on_dismiss = on_action, on_dismiss
+        self.setObjectName("adv")
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(14, 10, 12, 10)
+        lay.setSpacing(4)
+        top = QHBoxLayout()
+        self.badge = QLabel()
+        self.badge.setObjectName("badge")
+        top.addWidget(self.badge)
+        self.meta = label("", "muted")
+        top.addWidget(self.meta)
+        top.addStretch(1)
+        x = QPushButton("Dismiss")
+        x.setObjectName("link")
+        x.clicked.connect(lambda: self.on_dismiss(self.advice.key))
+        top.addWidget(x)
+        lay.addLayout(top)
+        self.title = label("", "advT", True)
+        self.body = label("", None, True)
+        self.body.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        lay.addWidget(self.title)
+        lay.addWidget(self.body)
+        self.steps_btn = QPushButton("Show what to do")
+        self.steps_btn.setObjectName("link")
+        self.steps_btn.clicked.connect(self._toggle)
+        self.steps = label("", "steps", True)
+        self.steps.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        lay.addWidget(self.steps)
+        self.btns = QHBoxLayout()
+        self.btns.setSpacing(6)
+        self.btns.addWidget(self.steps_btn)
+        lay.addLayout(self.btns)
+        self.refresh(a)
+
+    def _toggle(self):
+        v = not self._open
+        self._open = v
+        self.steps.setVisible(v)
+        self.steps_btn.setText("Hide steps" if v else "Show what to do")
+
+    def refresh(self, a):
+        self.advice = a
+        col, name = SEV.get(a.severity, ("#9aa3b2", a.severity.upper()))
+        self.setStyleSheet(f"QFrame#adv {{ background:#171a21; border:1px solid #2a2f3a; border-left:4px solid {col}; border-radius:8px; }}")
+        self.badge.setText(name)
+        self.badge.setStyleSheet(f"color:{col}; font-weight:700; font-size:8.5pt;")
+        meta = [a.ts.strftime("%H:%M:%S"), PHASE.get(a.phase, a.phase)]
+        if a.video_t is not None:
+            meta.append(f"video {fmt_t(a.video_t)}")
+        if a.count > 1:
+            meta.append(f"×{a.count:,}")
+        self.meta.setText("  ·  ".join(meta))
+        self.title.setText(a.title)
+        self.body.setText(a.body)
+        self.body.setVisible(bool(a.body))
+        self.steps.setText("<br>".join(f"{i + 1}. {report.E(s)}" for i, s in enumerate(a.steps)))
+        auto_open = a.severity in ("critical", "warning", "request") or a.key == "analysis-done"
+        if not hasattr(self, "_open"):
+            self._open = bool(a.steps) and auto_open
+        self.steps.setVisible(bool(a.steps) and self._open)
+        self.steps_btn.setVisible(bool(a.steps))
+        self.steps_btn.setText("Hide steps" if self._open else "Show what to do")
+        # rebuild action buttons
+        while self.btns.count() > 1:
+            it = self.btns.takeAt(1)
+            if it.widget():
+                it.widget().deleteLater()
+        for lbl, aid, data in a.actions:
+            b = QPushButton(lbl)
+            b.setObjectName("act")
+            b.clicked.connect(lambda _=False, i=aid, d=data: self.on_action(i, d))
+            self.btns.addWidget(b)
+        self.btns.addStretch(1)
+
+
+# ------------------------------------------------------------------------------ workers
+class AnalyzeWorker(QThread):
+    progress = Signal(str, float)
+    done = Signal(object, str)
+    failed = Signal(str)
+
+    def __init__(self, log_path, videos, monitor_path, deep, rec_filter):
+        super().__init__()
+        self.args = (log_path, videos, monitor_path, deep, rec_filter)
+        self._cancel = False
+
+    def cancel(self):
+        self._cancel = True
+
+    def run(self):
+        log_path, videos, monitor_path, deep, rec_filter = self.args
+        try:
+            res = analyze.run(log_path, video_paths=videos, monitor_path=monitor_path, deep=deep,
+                              progress=lambda m, p: self.progress.emit(m, p), cancel=lambda: self._cancel,
+                              recordings_filter=rec_filter)
+            if self._cancel:
+                self.failed.emit("Cancelled.")
+                return
+            path = report.save(res, REPORTS)
+            self.done.emit(res, path)
+        except Exception:
+            self.failed.emit(traceback.format_exc())
+
+
+class TestObsWorker(QThread):
+    result = Signal(bool, str)
+
+    def __init__(self, port, password):
+        super().__init__()
+        self.port, self.password = port, password
+
+    def run(self):
+        try:
+            c = ObsClient("127.0.0.1", self.port, self.password)
+            c.connect()
+            v = c.request("GetVersion")
+            st = c.request("GetStats")
+            c.close()
+            self.result.emit(True, f"Connected to OBS {v.get('obsVersion', '')} — {st.get('activeFps', 0):.0f} fps")
+        except PermissionError as e:
+            self.result.emit(False, str(e))
+        except Exception:
+            self.result.emit(False, "Couldn’t reach OBS. Is OBS open, and is Tools → WebSocket Server Settings → “Enable WebSocket server” ticked?")
+
+
+# ------------------------------------------------------------------------------ main window
+class Main(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.settings = load_settings()
+        self.setWindowTitle(APP_NAME)
+        self.setWindowIcon(QIcon(resource("icon.ico")))
+        self.resize(1080, 760)
+        self.monitor: Monitor | None = None
+        self.session_dir = None
+        self.mon_started = None
+        self.worker = None
+        self.parsed_log = None
+        self.video_overrides = {}
+        self.quitting = False
+
+        tabs = QTabWidget()
+        self.tabs = tabs
+        self.advisor = None
+        self._ui_q = queue.Queue()
+        self._live_job = False
+        self.last_video = None
+        settings_tab = self._settings_tab()     # build first: other tabs read its widgets
+        tabs.addTab(self._live_tab(), "  Live  ")
+        tabs.addTab(self._analyze_tab(), "  Analyze  ")
+        tabs.addTab(self._reports_tab(), "  Reports  ")
+        tabs.addTab(settings_tab, "  Settings  ")
+        tabs.addTab(self._help_tab(), "  Help  ")
+        self.setCentralWidget(tabs)
+        self.statusBar().showMessage(f"Data folder: {DATA}")
+        self.toast_combo.setToolTip("How the app alerts you while you play")
+
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self._tick)
+        self.timer.start(1000)
+
+        self._setup_tray()
+        self.refresh_logs()
+        self.refresh_sessions()
+        self.refresh_reports()
+        if self.settings.get("autostart"):
+            QTimer.singleShot(800, self.start_monitor)
+
+    # ------------------------------------------------------------------ live tab
+    def _live_tab(self):
+        w = QWidget()
+        root = QVBoxLayout(w)
+        root.setContentsMargins(22, 18, 22, 18)
+        root.setSpacing(12)
+
+        top = card()
+        tl = QHBoxLayout(top)
+        tl.setContentsMargins(20, 14, 20, 14)
+        self.phase_dot = QLabel()
+        self.phase_dot.setFixedSize(14, 14)
+        self._set_dot("#6b7280")
+        tl.addWidget(self.phase_dot, 0, Qt.AlignVCenter)
+        tl.addSpacing(6)
+        col = QVBoxLayout()
+        self.mon_title = label("Not watching", "h1")
+        self.mon_sub = label("Click Start before you play. The advisor watches OBS, the log, the PC and the file, and alerts you with Windows pop-ups.", "muted", True)
+        col.addWidget(self.mon_title)
+        col.addWidget(self.mon_sub)
+        tl.addLayout(col, 1)
+        self.pf_btn = QPushButton("Run pre-flight check")
+        self.pf_btn.clicked.connect(self.run_preflight)
+        tl.addWidget(self.pf_btn, 0, Qt.AlignVCenter)
+        self.mon_btn = QPushButton("Start watching")
+        self.mon_btn.setObjectName("primary")
+        self.mon_btn.setMinimumWidth(180)
+        self.mon_btn.clicked.connect(self.toggle_monitor)
+        tl.addWidget(self.mon_btn, 0, Qt.AlignVCenter)
+        root.addWidget(top)
+
+        grid = QGridLayout()
+        grid.setSpacing(8)
+        self.t_rec = Tile("Recording")
+        self.t_skip_r = Tile("Rendering lag")
+        self.t_skip_e = Tile("Encoding skips")
+        self.t_fps = Tile("OBS FPS")
+        self.t_gpu = Tile("GPU 3D")
+        self.t_enc = Tile("GPU encoder")
+        self.t_cpu = Tile("CPU")
+        self.t_disk = Tile("Recording drive")
+        for i, t in enumerate((self.t_rec, self.t_skip_r, self.t_skip_e, self.t_fps, self.t_gpu, self.t_enc, self.t_cpu, self.t_disk)):
+            grid.addWidget(t, 0, i)
+        root.addLayout(grid)
+
+        hdr = QHBoxLayout()
+        hdr.addWidget(label("Advisor", "h2"))
+        self.feed_count = label("", "muted")
+        hdr.addWidget(self.feed_count)
+        hdr.addStretch(1)
+        self.feed_filter = QComboBox()
+        self.feed_filter.addItems(["Show everything", "Problems and requests only"])
+        self.feed_filter.currentIndexChanged.connect(self._apply_filter)
+        hdr.addWidget(self.feed_filter)
+        b = QPushButton("Clear")
+        b.clicked.connect(self.clear_feed)
+        hdr.addWidget(b)
+        root.addLayout(hdr)
+
+        self.feed_area = QScrollArea()
+        self.feed_area.setWidgetResizable(True)
+        self.feed_area.setObjectName("feed")
+        inner = QWidget()
+        inner.setObjectName("feedInner")
+        self.feed_lay = QVBoxLayout(inner)
+        self.feed_lay.setContentsMargins(0, 0, 6, 0)
+        self.feed_lay.setSpacing(8)
+        self.feed_lay.addStretch(1)
+        self.feed_area.setWidget(inner)
+        root.addWidget(self.feed_area, 1)
+        self.cards = {}       # key -> AdviceCard
+        self._toast_last = 0
+        self.post_local(Advice("hello", "status", "before", "Ready",
+                               "1) Click “Run pre-flight check” to review your OBS settings.  2) Click “Start watching”, then play and record like normal.  "
+                               "3) When you stop recording, I’ll check the file and post a report here."))
+        return w
+
+    def _set_dot(self, color):
+        self.phase_dot.setStyleSheet(f"background:{color}; border-radius:7px;")
+
+    # ------------------------------------------------------------------ feed
+    def post_local(self, a):
+        """Add or update a card in the feed (UI thread)."""
+        c = self.cards.get(a.key)
+        if c and (a.update or c.advice.uid == a.uid):
+            c.refresh(a)
+            self.feed_lay.removeWidget(c)
+            self.feed_lay.insertWidget(0, c)
+        else:
+            if c:
+                c.setParent(None)
+                c.deleteLater()
+            c = AdviceCard(a, self._action, self._dismiss)
+            self.cards[a.key] = c
+            self.feed_lay.insertWidget(0, c)
+        c.setVisible(self._passes(a))
+        while len(self.cards) > 150:   # keep the feed light during long sessions
+            oldest = self.feed_lay.itemAt(self.feed_lay.count() - 2).widget()
+            self._dismiss(oldest.advice.key)
+        self.feed_count.setText(f"{len(self.cards)} message(s)")
+        self._maybe_toast(a)
+
+    def _passes(self, a):
+        return self.feed_filter.currentIndex() == 0 or a.severity in ("critical", "warning", "request")
+
+    def _apply_filter(self):
+        for c in self.cards.values():
+            c.setVisible(self._passes(c.advice))
+
+    def _dismiss(self, key):
+        c = self.cards.pop(key, None)
+        if c:
+            c.setParent(None)
+            c.deleteLater()
+        self.feed_count.setText(f"{len(self.cards)} message(s)")
+
+    def clear_feed(self):
+        for k in list(self.cards):
+            self._dismiss(k)
+
+    def _maybe_toast(self, a):
+        lvl = self.toast_combo.currentIndex() if hasattr(self, "toast_combo") else 1
+        if lvl == 2 or a.phase == "before":
+            return
+        want = {"critical"} if lvl == 0 else {"critical", "warning", "request"}
+        if a.severity not in want and not (a.key.startswith("rec-stop") or a.key == "analysis-done"):
+            return
+        now = time.time()
+        if a.severity != "critical" and now - self._toast_last < 30:
+            return
+        self._toast_last = now
+        if QSystemTrayIcon.isSystemTrayAvailable():
+            icon = QSystemTrayIcon.Critical if a.severity == "critical" else (QSystemTrayIcon.Warning if a.severity in ("warning", "request") else QSystemTrayIcon.Information)
+            self.tray.showMessage(a.title, (a.steps[0] if a.steps else a.body)[:200], icon, 8000)
+        if self.cb_sound.isChecked() and a.severity in ("critical", "warning"):
+            QApplication.beep()
+
+    # ------------------------------------------------------------------ actions
+    def _action(self, action_id, data):
+        if action_id in ("pause", "resume"):
+            self._obs_call("PauseRecord" if action_id == "pause" else "ResumeRecord")
+        elif action_id == "browse_log":
+            p, _ = QFileDialog.getOpenFileName(self, "Choose an OBS log", obs_log.default_log_dir(), "OBS log (*.txt *.log);;All files (*)")
+            if p:
+                self.tabs.setCurrentIndex(1)
+                self._add_log(p)
+        elif action_id == "locate_video":
+            p, _ = QFileDialog.getOpenFileName(self, "Locate the recording", "", "Video (*.mkv *.mp4 *.mov *.flv *.ts *.m4v);;All files (*)")
+            if p:
+                self.last_video = p
+                if self.advisor:
+                    self.advisor.rec_path = p
+                self.post_local(Advice("located", "status", "after", "Got it", f"I’ll use {p} for the analysis."))
+        elif action_id in ("analyze_last", "deep_last"):
+            self.analyze_last(deep=action_id == "deep_last")
+        elif action_id == "open_report" and data:
+            QDesktopServices.openUrl(QUrl.fromLocalFile(data))
+        elif action_id == "open_settings":
+            self.tabs.setCurrentIndex(3)
+
+    def _obs_call(self, req):
+        port, pw = self.port.value(), self.pw.text()
+
+        def go():
+            try:
+                c = ObsClient("127.0.0.1", port, pw)
+                c.connect()
+                c.request(req)
+                c.close()
+                self._ui_q.put(Advice(f"obs-{req}", "status", "during", "Recording paused" if req == "PauseRecord" else "Recording resumed",
+                                      "Fix the setting, then click Resume (or resume in OBS)." if req == "PauseRecord" else "",
+                                      actions=[("Resume recording", "resume", None)] if req == "PauseRecord" else []))
+            except Exception as e:
+                self._ui_q.put(Advice(f"obs-{req}-err", "warning", "during", "Couldn’t reach OBS",
+                                      f"{e}. Use OBS’s own Pause button, or check the WebSocket settings."))
+        threading.Thread(target=go, daemon=True).start()
+
+    # ------------------------------------------------------------------ pre-flight
+    def run_preflight(self):
+        self.pf_btn.setEnabled(False)
+
+        def go():
+            try:
+                items = LiveAdvisor(None).preflight(announce=False)
+            except Exception as e:
+                items = [Advice("pf-error", "warning", "before", "Pre-flight check could not finish", repr(e))]
+            for a in reversed(items):     # newest-first feed: keep the summary card on top
+                self._ui_q.put(a)
+            self._ui_q.put("pf-done")
+        threading.Thread(target=go, daemon=True).start()
+
+    # ------------------------------------------------------------------ watch start/stop
+    def toggle_monitor(self):
+        if self.monitor:
+            self.stop_monitor()
+        else:
+            self.start_monitor()
+
+    def start_monitor(self):
+        if self.monitor:
+            return
+        self._save_opts()
+        self.session_dir = os.path.join(SESSIONS, datetime.now().strftime("%Y-%m-%d %H-%M-%S"))
+        try:
+            import psutil
+            if sys.platform == "win32":
+                psutil.Process().nice(psutil.BELOW_NORMAL_PRIORITY_CLASS)
+        except Exception:
+            pass
+        self.monitor = Monitor(self.session_dir, interval=1.0, obs_port=self.port.value(), obs_password=self.pw.text())
+        self.monitor.start()
+        self.advisor = LiveAdvisor(self.monitor)
+        self.advisor.start()
+        self.mon_started = time.time()
+        self.mon_btn.setText("Stop watching")
+        self.mon_btn.setObjectName("stop")
+        self.mon_btn.setStyle(self.mon_btn.style())
+        self.tray_stop.setEnabled(True)
+        self.tray.setToolTip(f"{APP_NAME} — watching")
+        self._set_dot("#3ecf8e")
+        self.post_local(Advice(f"watch-{time.time():.0f}", "status", "before", "Watching started",
+                               "Checking your OBS settings now. You can minimize this window — alerts will pop up in the corner of the screen."))
+
+    def stop_monitor(self):
+        if not self.monitor:
+            return
+        m = self.monitor
+        self.monitor = None
+        m.stop()
+        if self.advisor:
+            self.advisor.stop()
+        self.mon_btn.setText("Start watching")
+        self.mon_btn.setObjectName("primary")
+        self.mon_btn.setStyle(self.mon_btn.style())
+        self.mon_title.setText("Not watching")
+        self._set_dot("#6b7280")
+        dur = time.time() - (self.mon_started or time.time())
+        self.mon_sub.setText(f"Last session saved ({analyze.fmt_t(dur)}, {m.counts['samples']:,} samples).")
+        self.tray_stop.setEnabled(False)
+        self.tray.setToolTip(APP_NAME)
+        self.refresh_sessions(select=os.path.join(self.session_dir, "monitor.jsonl"))
+
+    # ------------------------------------------------------------------ after-recording analysis
+    def analyze_last(self, deep=False, log_path=None, video=None):
+        if self.worker:
+            self.post_local(Advice("an-busy", "status", "after", "An analysis is already running", "I’ll post the result here when it’s done."))
+            return
+        logs = obs_log.latest_logs(1)
+        log_path = log_path or (logs[0] if logs else None)
+        if not log_path:
+            self.post_local(Advice("need-log", "request", "after", "I need the OBS log for this recording",
+                                   "OBS → Help → Log Files → Show Log Files, then pick the newest file.",
+                                   actions=[("Browse for log…", "browse_log", None)]))
+            return
+        try:
+            lg = obs_log.parse(log_path)
+        except Exception as e:
+            self.post_local(Advice("log-bad", "warning", "after", "Couldn’t read the OBS log", repr(e)))
+            return
+        if not lg.recordings:
+            self.post_local(Advice("no-rec", "request", "after", "That log has no recordings in it",
+                                   "If you restarted OBS, pick the log from the session you recorded in.",
+                                   actions=[("Browse for log…", "browse_log", None)]))
+            return
+        idx = len(lg.recordings) - 1
+        vid = video or getattr(self, "last_video", None) or lg.recordings[idx].path
+        if not vid or not os.path.isfile(vid):
+            self.post_local(Advice("need-video", "request", "after", "Where is the recording file?",
+                                   f"I couldn’t open {vid or 'the file'}. If you moved it, point me to it. I’ll still analyze the log and PC data without it.",
+                                   actions=[("Locate file…", "locate_video", None)]))
+            vid = None
+        mon = os.path.join(self.session_dir, "monitor.jsonl") if self.session_dir else None
+        self.post_local(Advice("analysis-run", "status", "after", "Analyzing the recording…" + (" (deep scan)" if deep else ""),
+                               "This reads the log, the PC data and the file. A deep scan of a long recording can take several minutes.", update=True))
+        self._live_job = True
+        self._start_worker(log_path, {idx: vid} if vid else {}, mon if mon and os.path.isfile(mon) else None, deep, [idx])
+
+    def _post_analysis(self, res, path):
+        bad = [f for f in res.findings if f.severity in ("critical", "warning")]
+        sev = "critical" if any(f.severity == "critical" for f in bad) else ("warning" if bad else "good")
+        steps = [f"{f.title}" + (f" — {f.fix}" if f.fix else "") for f in bad[:6]]
+        self._dismiss("analysis-run")
+        self.post_local(Advice("analysis-done", sev, "after",
+                               "Report ready — " + (f"{len(bad)} thing(s) to look at" if bad else "no problems found"),
+                               "Top findings below. The full report has the timeline with timestamps and the likely cause of each problem.",
+                               steps=steps,
+                               actions=[("Open report", "open_report", path), ("Run deep scan", "deep_last", None)]))
+
+    # ------------------------------------------------------------------ tick
+    def _tick(self):
+        while True:
+            try:
+                a = self._ui_q.get_nowait()
+            except queue.Empty:
+                break
+            if a == "pf-done":
+                self.pf_btn.setEnabled(True)
+            else:
+                self.post_local(a)
+        if self.advisor:
+            for a in self.advisor.drain():
+                self.post_local(a)
+            if self.advisor.want_analysis and self.cb_autoanalyze.isChecked():
+                log_path, rec = self.advisor.want_analysis
+                self.advisor.want_analysis = None
+                self.last_video = rec
+                QTimer.singleShot(4000, lambda lp=log_path, r=rec: self.analyze_last(log_path=lp or None, video=r or None))
+        m = self.monitor
+        if not m:
+            return
+        s = m.latest or {}
+        o = s.get("obs") or {}
+        el = time.time() - (self.mon_started or time.time())
+        if o.get("rec"):
+            if o.get("rec_paused"):
+                self.mon_title.setText(f"Recording paused — {(o.get('rec_tc') or '')[:8]}")
+                self._set_dot("#f5b748")
+            else:
+                self.mon_title.setText(f"Recording — {(o.get('rec_tc') or '')[:8]}")
+                self._set_dot("#ff5d5d")
+        else:
+            self.mon_title.setText(f"Watching — not recording yet ({analyze.fmt_t(el)})" if not self.advisor or not self.advisor.cards.get("rec-start")
+                                   else f"Watching — recording stopped ({analyze.fmt_t(el)})")
+            self._set_dot("#3ecf8e")
+        self.mon_sub.setText(f"OBS {m.obs_status}  ·  {m.counts['samples']:,} samples  ·  watching for {analyze.fmt_t(el)}  ·  minimize me, alerts will pop up")
+        if o:
+            if o.get("rec"):
+                self.t_rec.set("PAUSED" if o.get("rec_paused") else "REC", f"{o.get('rec_mbs', 0) or 0:.0f} MB/s written")
+                self.t_rec.v.setStyleSheet("color:#f5b748" if o.get("rec_paused") else "color:#ff5d5d")
+            else:
+                self.t_rec.set("Idle", "not recording")
+            self.t_skip_r.set(f"{m.counts['render_skips']:,}", f"OBS total {o.get('render_skip', 0):,}", bad=m.counts['render_skips'] > 0)
+            self.t_skip_e.set(f"{m.counts['encode_skips']:,}", f"OBS total {o.get('enc_skip', 0):,}", bad=m.counts['encode_skips'] > 0)
+            self.t_fps.set(f"{o.get('fps', 0):.1f}", f"render {o.get('render_ms', 0):.1f} ms", warn=o.get("render_ms", 0) > 12)
+        else:
+            for t in (self.t_rec, self.t_skip_r, self.t_skip_e, self.t_fps):
+                t.set("—", "OBS not connected")
+        g = s.get("gpu_3d")
+        self.t_gpu.set(f"{g:.0f}%" if isinstance(g, (int, float)) else "—", ", ".join(n for n, _ in (s.get("gpu_procs") or [])[:1]), warn=(g or 0) >= 90)
+        e = s.get("gpu_enc")
+        nv = (s.get("nv") or {})
+        if nv.get("enc") is not None:
+            e = max(e or 0, nv["enc"])
+        self.t_enc.set(f"{e:.0f}%" if isinstance(e, (int, float)) else "—", f"GPU {nv.get('temp'):.0f} °C" if nv.get("temp") else "", warn=(e or 0) >= 90)
+        c = s.get("cpu")
+        self.t_cpu.set(f"{c:.0f}%" if isinstance(c, (int, float)) else "—", f"RAM {s.get('ram', 0):.0f}%", warn=(c or 0) >= 90)
+        disks = s.get("disks") or {}
+        letter = (self.advisor.drive.get("letter") if self.advisor and self.advisor.drive else "") or self._guess_rec_drive()
+        d = disks.get(letter) if letter else None
+        if d:
+            self.t_disk.set(f"{d.get('busy', 0):.0f}%", f"{letter} {d.get('write_ms', 0):.0f} ms/write",
+                            warn=d.get("write_ms", 0) > 100 or d.get("busy", 0) > 90, bad=d.get("write_ms", 0) > 500)
+        elif disks:
+            k, d = max(disks.items(), key=lambda kv: kv[1].get("busy", 0))
+            self.t_disk.set(f"{d.get('busy', 0):.0f}%", f"busiest: {k}")
+        self.tray.setToolTip(f"{APP_NAME} — {self.mon_title.text()}")
+
+    def _guess_rec_drive(self):
+        if self.parsed_log and self.parsed_log.recordings:
+            p = self.parsed_log.recordings[-1].path
+            if len(p) > 1 and p[1] == ":":
+                return p[0].upper() + ":"
+        return ""
+
+    # ------------------------------------------------------------------ settings tab
+    def _settings_tab(self):
+        w = QWidget()
+        root = QVBoxLayout(w)
+        root.setContentsMargins(22, 18, 22, 18)
+        root.setSpacing(12)
+        obs = card()
+        ol = QGridLayout(obs)
+        ol.setContentsMargins(18, 14, 18, 14)
+        ol.addWidget(label("OBS connection", "h2"), 0, 0, 1, 4)
+        cfg = obs_ws_config()
+        self.obs_hint = label("", "muted", True)
+        ol.addWidget(self.obs_hint, 1, 0, 1, 5)
+        ol.addWidget(label("Port"), 2, 0)
+        self.port = QSpinBox()
+        self.port.setRange(1, 65535)
+        self.port.setValue(int(self.settings.get("port") or cfg["port"]))
+        ol.addWidget(self.port, 2, 1)
+        ol.addWidget(label("Password"), 2, 2)
+        self.pw = QLineEdit(self.settings.get("password") or cfg["password"])
+        self.pw.setEchoMode(QLineEdit.Password)
+        self.pw.setPlaceholderText("auto-filled from OBS if found")
+        ol.addWidget(self.pw, 2, 3)
+        self.test_btn = QPushButton("Test connection")
+        self.test_btn.clicked.connect(self.test_obs)
+        ol.addWidget(self.test_btn, 2, 4)
+        self.obs_state = label("", "muted", True)
+        ol.addWidget(self.obs_state, 3, 0, 1, 5)
+        ol.setColumnStretch(3, 1)
+        if cfg["found"]:
+            self.obs_hint.setText("OBS settings found and filled in automatically." if cfg["enabled"] else
+                                  "OBS WebSocket is turned off. In OBS open Tools → WebSocket Server Settings and tick “Enable WebSocket server”. "
+                                  "This lets the advisor see each skipped frame the second it happens and pause recording for you.")
+        else:
+            self.obs_hint.setText("In OBS open Tools → WebSocket Server Settings, tick “Enable WebSocket server”, click “Show Connect Info” and copy the password here.")
+        root.addWidget(obs)
+
+        al = card()
+        all_ = QGridLayout(al)
+        all_.setContentsMargins(18, 14, 18, 14)
+        all_.addWidget(label("Alerts while you play", "h2"), 0, 0, 1, 2)
+        all_.addWidget(label("Windows pop-ups"), 1, 0)
+        self.toast_combo = QComboBox()
+        self.toast_combo.addItems(["Critical problems only", "Warnings and critical (recommended)", "Off"])
+        self.toast_combo.setCurrentIndex(int(self.settings.get("toasts", 1)))
+        self.toast_combo.currentIndexChanged.connect(self._save_opts)
+        all_.addWidget(self.toast_combo, 1, 1)
+        self.cb_sound = QCheckBox("Play a sound with warnings")
+        self.cb_sound.setChecked(bool(self.settings.get("sound", False)))
+        all_.addWidget(self.cb_sound, 2, 0, 1, 2)
+        all_.addWidget(label("At most one pop-up every 30 seconds, except critical problems. Tip: turn off Windows “Do not disturb while gaming” (Settings → System → Notifications) so pop-ups appear over games.", "muted", True), 3, 0, 1, 2)
+        all_.setColumnStretch(1, 1)
+        root.addWidget(al)
+
+        opts = card()
+        opl = QVBoxLayout(opts)
+        opl.setContentsMargins(18, 12, 18, 12)
+        opl.addWidget(label("Behavior", "h2"))
+        self.cb_autostart = QCheckBox("Start watching automatically when this app opens")
+        self.cb_autostart.setChecked(bool(self.settings.get("autostart")))
+        self.cb_tray = QCheckBox("Keep running in the system tray when I close the window while watching")
+        self.cb_tray.setChecked(self.settings.get("tray", True))
+        self.cb_autoanalyze = QCheckBox("When a recording stops, analyze it automatically and post the report in the Advisor")
+        self.cb_autoanalyze.setChecked(self.settings.get("autoanalyze", True))
+        for c in (self.cb_autostart, self.cb_tray, self.cb_autoanalyze, self.cb_sound):
+            c.stateChanged.connect(self._save_opts)
+        for c in (self.cb_autostart, self.cb_tray, self.cb_autoanalyze):
+            opl.addWidget(c)
+        opl.addWidget(label("The app never changes OBS settings by itself. It only recommends changes, and pauses or resumes recording when you click the button.", "muted", True))
+        root.addWidget(opts)
+        root.addStretch(1)
+        return w
+
+    def _save_opts(self):
+        if not hasattr(self, "cb_autoanalyze"):
+            return
+        self.settings.update({"autostart": self.cb_autostart.isChecked(), "tray": self.cb_tray.isChecked(),
+                              "autoanalyze": self.cb_autoanalyze.isChecked(), "port": self.port.value(), "password": self.pw.text(),
+                              "toasts": self.toast_combo.currentIndex(), "sound": self.cb_sound.isChecked(),
+                              "deep": self.cb_deep.isChecked() if hasattr(self, "cb_deep") else False})
+        save_settings(self.settings)
+
+    def test_obs(self):
+        self.test_btn.setEnabled(False)
+        self.obs_state.setText("Connecting…")
+        self._tw = TestObsWorker(self.port.value(), self.pw.text())
+        self._tw.result.connect(self._obs_result)
+        self._tw.start()
+
+    def _obs_result(self, ok, msg):
+        self.test_btn.setEnabled(True)
+        self.obs_state.setText(("Connected. " if ok else "Not connected. ") + msg)
+        self.obs_state.setStyleSheet(f"color:{'#3ecf8e' if ok else '#ff5d5d'}")
+        if ok:
+            self._save_opts()
+
+
+    # ------------------------------------------------------------------ analyze tab
+    def _analyze_tab(self):
+        w = QWidget()
+        root = QVBoxLayout(w)
+        root.setContentsMargins(22, 18, 22, 18)
+        root.setSpacing(12)
+
+        c1 = card()
+        g = QGridLayout(c1)
+        g.setContentsMargins(18, 14, 18, 14)
+        g.addWidget(label("1. OBS log", "h2"), 0, 0, 1, 3)
+        self.log_combo = QComboBox()
+        self.log_combo.currentIndexChanged.connect(self._log_changed)
+        g.addWidget(self.log_combo, 1, 0, 1, 2)
+        b = QPushButton("Browse…")
+        b.clicked.connect(self.browse_log)
+        g.addWidget(b, 1, 2)
+        g.addWidget(label("Recordings found in this log — tick the ones to check. Double-click a row to point to a file you moved.", "muted", True), 2, 0, 1, 3)
+        self.rec_tree = QTreeWidget()
+        self.rec_tree.setHeaderLabels(["Recording", "Length", "OBS skips", "File"])
+        self.rec_tree.setRootIsDecorated(False)
+        self.rec_tree.itemDoubleClicked.connect(self.locate_file)
+        self.rec_tree.header().setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        self.rec_tree.header().setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        self.rec_tree.header().setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        self.rec_tree.header().setSectionResizeMode(3, QHeaderView.Stretch)
+        self.rec_tree.setMinimumHeight(150)
+        g.addWidget(self.rec_tree, 3, 0, 1, 3)
+        g.setColumnStretch(0, 1)
+        root.addWidget(c1, 1)
+
+        c2 = card()
+        g2 = QGridLayout(c2)
+        g2.setContentsMargins(18, 14, 18, 14)
+        g2.addWidget(label("2. Monitor session (optional)", "h2"), 0, 0, 1, 2)
+        self.sess_combo = QComboBox()
+        g2.addWidget(self.sess_combo, 1, 0)
+        g2.addWidget(label("Matches what your PC was doing to each skip.", "muted"), 1, 1)
+        g2.setColumnStretch(0, 1)
+        root.addWidget(c2)
+
+        c3 = card()
+        g3 = QGridLayout(c3)
+        g3.setContentsMargins(18, 14, 18, 14)
+        g3.addWidget(label("3. Options", "h2"), 0, 0, 1, 2)
+        self.cb_deep = QCheckBox("Deep scan — also find repeated and frozen frames (decodes the whole video; about 5–20 min per hour of 4K footage)")
+        self.cb_deep.setChecked(bool(self.settings.get("deep")))
+        self.cb_deep.stateChanged.connect(self._save_opts)
+        g3.addWidget(self.cb_deep, 1, 0, 1, 2)
+        root.addWidget(c3)
+
+        row = QHBoxLayout()
+        self.an_btn = QPushButton("Analyze")
+        self.an_btn.setObjectName("primary")
+        self.an_btn.clicked.connect(self.run_analysis)
+        self.vid_btn = QPushButton("Check a video file only…")
+        self.vid_btn.clicked.connect(self.analyze_video_only)
+        self.cancel_btn = QPushButton("Cancel")
+        self.cancel_btn.setEnabled(False)
+        self.cancel_btn.clicked.connect(self.cancel_analysis)
+        row.addWidget(self.an_btn)
+        row.addWidget(self.vid_btn)
+        row.addWidget(self.cancel_btn)
+        row.addStretch(1)
+        root.addLayout(row)
+        self.prog = QProgressBar()
+        self.prog.setRange(0, 1000)
+        self.prog.setValue(0)
+        self.prog.setTextVisible(False)
+        self.prog_lbl = label("", "muted", True)
+        root.addWidget(self.prog)
+        root.addWidget(self.prog_lbl)
+        self.summary = QTextBrowser()
+        self.summary.setOpenExternalLinks(True)
+        self.summary.setMinimumHeight(120)
+        self.summary.setHtml("<p style='color:#9aa3b2'>Results appear here, and the full report opens in your browser.</p>")
+        root.addWidget(self.summary, 1)
+        return w
+
+    def refresh_logs(self):
+        cur = self.log_combo.currentData()
+        self.log_combo.blockSignals(True)
+        self.log_combo.clear()
+        logs = obs_log.latest_logs(20)
+        extra = self.settings.get("extra_logs", [])
+        for p in extra:
+            if os.path.isfile(p) and p not in logs:
+                logs.insert(0, p)
+        for p in logs:
+            try:
+                mt = datetime.fromtimestamp(os.path.getmtime(p))
+                self.log_combo.addItem(f"{os.path.basename(p)}   (last written {mt:%b %d, %I:%M %p})", p)
+            except OSError:
+                pass
+        if not logs:
+            self.log_combo.addItem("No OBS logs found — use Browse…", None)
+        self.log_combo.blockSignals(False)
+        if cur:
+            i = self.log_combo.findData(cur)
+            if i >= 0:
+                self.log_combo.setCurrentIndex(i)
+        self._log_changed()
+
+    def browse_log(self):
+        p, _ = QFileDialog.getOpenFileName(self, "Choose an OBS log", obs_log.default_log_dir() or "", "OBS logs (*.txt *.log);;All files (*)")
+        if p:
+            self._add_log(p)
+
+    def _add_log(self, p):
+        if True:
+            extra = self.settings.get("extra_logs", [])
+            if p not in extra:
+                extra.insert(0, p)
+            self.settings["extra_logs"] = extra[:10]
+            save_settings(self.settings)
+            self.refresh_logs()
+            self.log_combo.setCurrentIndex(max(0, self.log_combo.findData(p)))
+
+    def _log_changed(self):
+        p = self.log_combo.currentData()
+        self.rec_tree.clear()
+        self.video_overrides = {}
+        self.parsed_log = None
+        if not p:
+            return
+        try:
+            self.parsed_log = obs_log.parse(p)
+        except Exception as e:
+            self.rec_tree.addTopLevelItem(QTreeWidgetItem([f"Could not read log: {e}"]))
+            return
+        recs = self.parsed_log.recordings
+        if not recs:
+            it = QTreeWidgetItem(["No recordings in this log", "", "", ""])
+            self.rec_tree.addTopLevelItem(it)
+        for i, o in enumerate(recs):
+            exists = os.path.isfile(o.path)
+            skips = "—"
+            if o.encode_total:
+                skips = f"{o.encode_skipped:,} ({100 * o.encode_skipped / o.encode_total:.2f}%)"
+            elif o.stop is None:
+                skips = "still recording"
+            length = analyze.fmt_t(o.duration_seconds) if o.stop else "…"
+            it = QTreeWidgetItem([f"{o.start:%b %d  %I:%M %p}", length, skips, (o.path if exists else f"✖ not found — double-click to locate   ({o.path})")])
+            it.setData(0, Qt.UserRole, i)
+            it.setFlags(it.flags() | Qt.ItemIsUserCheckable)
+            recent = o.duration_seconds >= 20 or o.stop is None
+            it.setCheckState(0, Qt.Checked if (i >= len(recs) - 3 and recent) else Qt.Unchecked)
+            if not exists:
+                it.setForeground(3, QColor("#f5b748"))
+            self.rec_tree.addTopLevelItem(it)
+        self._auto_pick_session()
+
+    def locate_file(self, item, col):
+        i = item.data(0, Qt.UserRole)
+        if i is None:
+            return
+        o = self.parsed_log.recordings[i]
+        start_dir = os.path.dirname(o.path) if os.path.isdir(os.path.dirname(o.path)) else ""
+        p, _ = QFileDialog.getOpenFileName(self, f"Locate recording from {o.start:%b %d %I:%M %p}", start_dir,
+                                           "Video (*.mkv *.mp4 *.mov *.flv *.ts *.m4v);;All files (*)")
+        if p:
+            self.video_overrides[i] = p
+            item.setText(3, p)
+            item.setForeground(3, QColor("#e7e9ee"))
+            item.setCheckState(0, Qt.Checked)
+
+    def refresh_sessions(self, select=None):
+        self.sess_combo.clear()
+        self.sess_combo.addItem("None — use OBS log and video only", None)
+        items = []
+        if os.path.isdir(SESSIONS):
+            for d in sorted(os.listdir(SESSIONS), reverse=True):
+                p = os.path.join(SESSIONS, d, "monitor.jsonl")
+                if not os.path.isfile(p):
+                    continue
+                rng = self._session_range(p)
+                if not rng:
+                    continue
+                a, b = rng
+                items.append((p, a, b))
+                self.sess_combo.addItem(f"{a:%b %d  %I:%M %p} – {b:%I:%M %p}   ({analyze.fmt_t((b - a).total_seconds())})", p)
+        self._sessions = items
+        if select:
+            i = self.sess_combo.findData(select)
+            if i >= 0:
+                self.sess_combo.setCurrentIndex(i)
+        else:
+            self._auto_pick_session()
+
+    def _session_range(self, p):
+        try:
+            with open(p, "rb") as f:
+                first = None
+                for line in f:
+                    d = json.loads(line)
+                    if d.get("ts"):
+                        first = datetime.fromisoformat(d["ts"])
+                        break
+                f.seek(0, 2)
+                size = f.tell()
+                f.seek(max(0, size - 65536))
+                tail = f.read().decode("utf-8", "replace").strip().splitlines()
+            last = None
+            for line in reversed(tail):
+                try:
+                    d = json.loads(line)
+                    last = datetime.fromisoformat(d["ts"])
+                    break
+                except Exception:
+                    continue
+            return (first, last) if first and last else None
+        except Exception:
+            return None
+
+    def _auto_pick_session(self):
+        if not getattr(self, "_sessions", None) or not self.parsed_log:
+            return
+        recs = self.parsed_log.recordings
+        if not recs:
+            return
+        for p, a, b in self._sessions:
+            for o in recs[-3:]:
+                stop = o.stop or datetime.now()
+                if a <= stop and b >= o.start:
+                    i = self.sess_combo.findData(p)
+                    if i >= 0:
+                        self.sess_combo.setCurrentIndex(i)
+                    return
+
+    def run_analysis(self):
+        if self.worker:
+            return
+        p = self.log_combo.currentData()
+        if not p:
+            QMessageBox.information(self, APP_NAME, "Choose an OBS log first (or use “Check a video file only…”).")
+            return
+        sel = []
+        for k in range(self.rec_tree.topLevelItemCount()):
+            it = self.rec_tree.topLevelItem(k)
+            if it.data(0, Qt.UserRole) is not None and it.checkState(0) == Qt.Checked:
+                sel.append(it.data(0, Qt.UserRole))
+        if self.parsed_log and self.parsed_log.recordings and not sel:
+            QMessageBox.information(self, APP_NAME, "Tick at least one recording to analyze.")
+            return
+        self._start_worker(p, dict(self.video_overrides), self.sess_combo.currentData(), self.cb_deep.isChecked(), sel)
+
+    def analyze_video_only(self):
+        if self.worker:
+            return
+        p, _ = QFileDialog.getOpenFileName(self, "Choose a recording", "", "Video (*.mkv *.mp4 *.mov *.flv *.ts *.m4v);;All files (*)")
+        if p:
+            self._start_worker(None, {0: p}, None, self.cb_deep.isChecked(), None)
+
+    def _start_worker(self, log, vids, mon, deep, sel):
+        self.worker = AnalyzeWorker(log, vids, mon, deep, sel)
+        self.worker.progress.connect(self._prog)
+        self.worker.done.connect(self._done)
+        self.worker.failed.connect(self._failed)
+        self.an_btn.setEnabled(False)
+        self.vid_btn.setEnabled(False)
+        self.cancel_btn.setEnabled(True)
+        self.prog.setValue(0)
+        self.summary.setHtml("<p style='color:#9aa3b2'>Working…</p>")
+        self.worker.start()
+
+    def cancel_analysis(self):
+        if self.worker:
+            self.worker.cancel()
+            self.prog_lbl.setText("Cancelling…")
+
+    def _prog(self, msg, p):
+        self.prog.setValue(int(p * 1000))
+        self.prog_lbl.setText(msg)
+
+    def _finish(self):
+        self.worker = None
+        self.an_btn.setEnabled(True)
+        self.vid_btn.setEnabled(True)
+        self.cancel_btn.setEnabled(False)
+
+    def _done(self, res, path):
+        self._finish()
+        self.prog.setValue(1000)
+        self.prog_lbl.setText(f"Report saved: {path}")
+        sev_col = {"critical": "#ff5d5d", "warning": "#f5b748", "info": "#5fa8ff", "good": "#3ecf8e"}
+        rows = []
+        for f in res.findings[:14]:
+            rows.append(f"<div style='margin:3px 0'><b style='color:{sev_col.get(f.severity)}'>{f.severity.upper()}</b>&nbsp; {report.E(f.title)}</div>")
+        inc = [i for i in res.incidents if i.kind != "pause"]
+        url = QUrl.fromLocalFile(path).toString()
+        html = (f"<p><b>{len(res.findings)} findings, {len(inc)} timeline incidents.</b> "
+                f"<a style='color:#ff7b7b' href='{url}'>Open full report</a></p>" + "".join(rows))
+        for n in res.notes:
+            html += f"<p style='color:#9aa3b2'>{report.E(n)}</p>"
+        self.summary.setHtml(html)
+        self.refresh_reports()
+        if self._live_job:
+            self._live_job = False
+            self._post_analysis(res, path)
+        else:
+            QDesktopServices.openUrl(QUrl.fromLocalFile(path))
+
+    def _failed(self, msg):
+        self._finish()
+        if self._live_job:
+            self._live_job = False
+            self._dismiss("analysis-run")
+            self.post_local(Advice("analysis-fail", "warning", "after", "Analysis stopped", msg.strip().splitlines()[-1][:300],
+                                   actions=[("Try again", "analyze_last", None)]))
+        self.prog_lbl.setText("Analysis stopped.")
+        self.summary.setPlainText(msg)
+
+    # ------------------------------------------------------------------ reports tab
+    def _reports_tab(self):
+        w = QWidget()
+        root = QVBoxLayout(w)
+        root.setContentsMargins(22, 18, 22, 18)
+        root.addWidget(label("Saved reports", "h2"))
+        self.rep_list = QListWidget()
+        self.rep_list.itemDoubleClicked.connect(lambda it: QDesktopServices.openUrl(QUrl.fromLocalFile(it.data(Qt.UserRole))))
+        root.addWidget(self.rep_list, 1)
+        row = QHBoxLayout()
+        for text, fn in (("Open", self._open_report), ("Open reports folder", lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(REPORTS))),
+                         ("Open sessions folder", lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(SESSIONS))), ("Delete", self._del_report)):
+            b = QPushButton(text)
+            b.clicked.connect(fn)
+            row.addWidget(b)
+        row.addStretch(1)
+        root.addLayout(row)
+        return w
+
+    def refresh_reports(self):
+        self.rep_list.clear()
+        if not os.path.isdir(REPORTS):
+            return
+        files = sorted((f for f in os.listdir(REPORTS) if f.endswith(".html")), reverse=True)
+        for f in files:
+            it = QListWidgetItem(f.replace(".html", ""))
+            it.setData(Qt.UserRole, os.path.join(REPORTS, f))
+            self.rep_list.addItem(it)
+
+    def _open_report(self):
+        it = self.rep_list.currentItem()
+        if it:
+            QDesktopServices.openUrl(QUrl.fromLocalFile(it.data(Qt.UserRole)))
+
+    def _del_report(self):
+        it = self.rep_list.currentItem()
+        if it and QMessageBox.question(self, APP_NAME, f"Delete “{it.text()}”?") == QMessageBox.Yes:
+            try:
+                os.remove(it.data(Qt.UserRole))
+            except OSError:
+                pass
+            self.refresh_reports()
+
+    # ------------------------------------------------------------------ help tab
+    def _help_tab(self):
+        w = QTextBrowser()
+        w.setOpenExternalLinks(True)
+        w.setHtml(f"""
+<div style='padding:14px;line-height:150%'>
+<h2>How to use</h2>
+<h3>Before you record</h3>
+<ol>
+<li>Open OBS, then this app. Click <b>Run pre-flight check</b>. The Advisor reads your OBS profile, scene sources and last log, and lists anything to fix first:
+color range, color format vs. encoder bit depth, capture-card FPS (59.94 vs 60), audio sample rates, HDR without “Force SDR”, a slow or nearly full recording drive, heavy encoder presets, and more. Each message has step-by-step instructions.</li>
+<li>Click <b>Start watching</b>, minimize the window, and play.</li>
+</ol>
+<h3>While you record</h3>
+<p>Every second the Advisor checks OBS (skipped frames, FPS, render time), the OBS log, the GPU encoder and 3D load, CPU, RAM, GPU temperature, the recording drive, and whether the file is still growing.
+About 25 seconds in, it opens the file to confirm the resolution, frame rate, color settings and audio match what you set.
+When something goes wrong it posts a message with the time, the position in the video, the likely cause, and what to do. You get a Windows pop-up, so you don't have to look at the app.
+Some messages have a <b>Pause recording</b> button. Use it, fix the setting, then click <b>Resume</b>.</p>
+<h3>After you record</h3>
+<p>When you stop recording, the app analyzes that recording automatically and posts a summary with <b>Open report</b> and <b>Run deep scan</b> buttons.
+If it can't find the file or log, it asks you for it with a <b>Locate file</b> or <b>Browse for log</b> button. You also get tips for afterward, such as remuxing MKV for editing.</p>
+<h3>One-time setup</h3>
+<p>In OBS open <b>Tools → WebSocket Server Settings</b> and tick <b>Enable WebSocket server</b>. The app fills in the password automatically.
+Without this, the app still reads the log, the PC data and the file, but it can't see skips the second they happen or pause recording for you.
+For pop-ups over full-screen games, turn off “Do not disturb” for games in Windows notification settings.</p>
+<p style='color:#9aa3b2'>The app never changes OBS settings by itself. Likely causes are educated guesses from what the PC was doing at that moment.</p>
+<h3>What the report checks</h3>
+<ul>
+<li>Rendering-lag and encoding-lag skips, with clock time <i>and</i> position in the video</li>
+<li>Missing frames (timestamp gaps) and variable frame timing in the file</li>
+<li>Deep scan: repeated and frozen frames, including the regular stutter caused by 59.94 vs 60 fps mismatches</li>
+<li>Audio gaps, audio/video drift, audio sample-rate mismatches, audio buffering changes</li>
+<li>Resolution, frame rate, color format, color space, color range and bit depth — OBS settings vs. what the file actually contains</li>
+<li>Capture-device settings, HDR/SDR conflicts, encoder settings that are too heavy</li>
+<li>What the PC was doing at each problem: GPU 3D and encoder load, CPU, RAM, recording drive busy/latency, GPU temperature, busiest programs</li>
+<li>Windows events: GPU driver resets, disk/USB errors, crashes</li>
+</ul>
+<p style='color:#9aa3b2'>Data folder: {DATA}<br>Version {VERSION}</p>
+</div>""")
+        return w
+
+    # ------------------------------------------------------------------ tray / close
+    def _setup_tray(self):
+        self.tray = QSystemTrayIcon(QIcon(resource("icon.ico")), self)
+        self.tray.setToolTip(APP_NAME)
+        menu = QMenu()
+        a_show = QAction("Show window", self)
+        a_show.triggered.connect(self.showNormal)
+        self.tray_stop = QAction("Stop watching", self)
+        self.tray_stop.triggered.connect(self.stop_monitor)
+        self.tray_stop.setEnabled(False)
+        a_quit = QAction("Quit", self)
+        a_quit.triggered.connect(self.quit_app)
+        menu.addAction(a_show)
+        menu.addAction(self.tray_stop)
+        menu.addSeparator()
+        menu.addAction(a_quit)
+        self.tray.setContextMenu(menu)
+        self.tray.activated.connect(lambda r: self.showNormal() if r in (QSystemTrayIcon.Trigger, QSystemTrayIcon.DoubleClick) else None)
+        if QSystemTrayIcon.isSystemTrayAvailable():
+            self.tray.show()
+
+    def quit_app(self):
+        self.quitting = True
+        if self.advisor:
+            self.advisor.stop()
+        if self.monitor:
+            self.monitor.stop()
+            self.monitor = None
+        QApplication.quit()
+
+    def closeEvent(self, e):
+        if self.monitor and not self.quitting:
+            if self.cb_tray.isChecked() and QSystemTrayIcon.isSystemTrayAvailable():
+                self.hide()
+                self.tray.showMessage(APP_NAME, "Still watching in the background. Alerts will pop up here. Right-click the tray icon to stop.", QSystemTrayIcon.Information, 4000)
+                e.ignore()
+                return
+            if QMessageBox.question(self, APP_NAME, "Watching is running. Stop it and quit?") != QMessageBox.Yes:
+                e.ignore()
+                return
+            if self.advisor:
+                self.advisor.stop()
+            self.monitor.stop()
+            self.monitor = None
+        if self.worker:
+            self.worker.cancel()
+            self.worker.wait(3000)
+        self.tray.hide()
+        e.accept()
+        QApplication.quit()
+
+
+def selftest(out):
+    """Used by the build pipeline: import everything, build the window offscreen, probe a file."""
+    os.environ["QT_QPA_PLATFORM"] = "offscreen"
+    lines = []
+    try:
+        from analyzer import video_probe, monitor, winevents, obs_config, live  # noqa: F401
+        lines.append("ffprobe: " + str(video_probe._tool("ffprobe")))
+        lines.append("ffmpeg: " + str(video_probe._tool("ffmpeg")))
+        app = QApplication(sys.argv)
+        app.setStyleSheet(STYLE.replace("CHECK_SVG", resource("check.svg").replace("\\", "/")))
+        w = Main()
+        w.run_preflight()
+        m = Monitor(os.path.join(SESSIONS, "_selftest"), interval=1.0)
+        m.start()
+        time.sleep(3)
+        m.stop()
+        lines.append(f"monitor samples: {m.counts['samples']}")
+        lines.append(f"pdh: {bool((m.latest or {}).get('disks'))}")
+        lines.append("OK")
+        code = 0
+    except Exception:
+        lines.append(traceback.format_exc())
+        code = 1
+    with open(out, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines))
+    os._exit(code)
+
+
+def main():
+    if "--selftest" in sys.argv:
+        selftest(sys.argv[sys.argv.index("--selftest") + 1])
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("bloodrive.obssessionanalyzer")
+        except Exception:
+            pass
+    app = QApplication(sys.argv)
+    app.setApplicationName(APP_NAME)
+    app.setStyle("Fusion")
+    pal = QPalette()
+    pal.setColor(QPalette.Window, QColor("#0f1115"))
+    pal.setColor(QPalette.WindowText, QColor("#e7e9ee"))
+    pal.setColor(QPalette.Base, QColor("#171a21"))
+    pal.setColor(QPalette.Text, QColor("#e7e9ee"))
+    pal.setColor(QPalette.Button, QColor("#232834"))
+    pal.setColor(QPalette.ButtonText, QColor("#e7e9ee"))
+    pal.setColor(QPalette.Highlight, QColor("#c23b3b"))
+    app.setPalette(pal)
+    app.setStyleSheet(STYLE.replace("CHECK_SVG", resource("check.svg").replace("\\", "/")))
+    app.setQuitOnLastWindowClosed(False)
+    w = Main()
+    if "--minimized" in sys.argv and QSystemTrayIcon.isSystemTrayAvailable():
+        w.tray.showMessage(APP_NAME, "Running in the tray. Click the icon to open.", QSystemTrayIcon.Information, 3000)
+    else:
+        w.show()
+    sys.exit(app.exec())
+
+
+if __name__ == "__main__":
+    main()

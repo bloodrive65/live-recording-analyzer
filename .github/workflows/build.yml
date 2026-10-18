@@ -1,0 +1,83 @@
+name: Build Windows installer
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Python packages
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller
+
+      - name: Download ffmpeg / ffprobe
+        shell: pwsh
+        run: |
+          $ProgressPreference = 'SilentlyContinue'
+          Invoke-WebRequest https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip -OutFile ffmpeg.zip
+          Expand-Archive ffmpeg.zip -DestinationPath ffmpeg_tmp
+          New-Item -ItemType Directory -Force bin | Out-Null
+          Get-ChildItem ffmpeg_tmp -Recurse -Include ffmpeg.exe,ffprobe.exe | Copy-Item -Destination bin
+          Get-ChildItem ffmpeg_tmp -Recurse -Filter LICENSE | Select-Object -First 1 | Copy-Item -Destination bin\FFMPEG-LICENSE.txt
+          Get-ChildItem bin
+
+      - name: Build app (PyInstaller)
+        run: >
+          pyinstaller --noconfirm --clean --windowed --onedir
+          --name "OBS Session Analyzer"
+          --icon assets\icon.ico
+          --add-data "assets;assets"
+          --add-binary "bin\ffmpeg.exe;bin"
+          --add-binary "bin\ffprobe.exe;bin"
+          --add-data "bin\FFMPEG-LICENSE.txt;bin"
+          --hidden-import win32pdh --hidden-import win32api
+          --exclude-module tkinter
+          app.py
+
+      - name: Self-test the built app
+        shell: pwsh
+        run: |
+          $p = Start-Process -FilePath "dist\OBS Session Analyzer\OBS Session Analyzer.exe" -ArgumentList "--selftest", "$PWD\selftest.txt" -Wait -PassThru
+          Get-Content selftest.txt
+          if ($p.ExitCode -ne 0) { exit 1 }
+
+      - name: Build installer (Inno Setup)
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress; }
+          $ver = "1.1.0"
+          if ("${{ github.ref_type }}" -eq "tag") { $ver = "${{ github.ref_name }}".TrimStart("v") }
+          & $iscc "/DAppVersion=$ver" packaging\installer.iss
+          Compress-Archive -Path "dist\OBS Session Analyzer\*" -DestinationPath "dist\OBS-Session-Analyzer-Portable-$ver.zip"
+          Get-ChildItem dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: OBS-Session-Analyzer-Windows
+          path: |
+            dist/*.exe
+            dist/*.zip
+            selftest.txt
+
+      - name: Publish release
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.exe
+            dist/*.zip
