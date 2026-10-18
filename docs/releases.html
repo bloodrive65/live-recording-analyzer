@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Releases · Live Recording Analyzer</title>
+<meta name="description" content="Download Live Recording Analyzer and see what changed in each version.">
+<meta property="og:title" content="Releases · Live Recording Analyzer"><meta property="og:description" content="Download Live Recording Analyzer and see what changed in each version.">
+<meta property="og:image" content="https://bloodrive65.github.io/live-recording-analyzer/assets/logo-512.png">
+<link rel="icon" href="assets/logo.svg" type="image/svg+xml"><link rel="icon" href="assets/favicon-32.png" sizes="32x32">
+<link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&family=Sora:wght@600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/site.css">
+</head><body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="top"><div class="wrap">
+<a class="brand" href="index.html"><img src="assets/logo.svg" alt="" width="32" height="32">Live Recording Analyzer</a>
+<button class="menu-btn" aria-label="Menu" aria-expanded="false" aria-controls="nav">&#9776;</button>
+<nav class="nav" id="nav" aria-label="Main"><a href="index.html">Home</a><a href="getting-started.html">Getting started</a><a href="using-the-app.html">Using the app</a><a href="problems-explained.html">Problems explained</a><a href="faq.html">FAQ & fixes</a><a href="releases.html" aria-current=page>Releases</a></nav>
+</div></header>
+<main id="main"><div class="wrap page"><aside class="toc" aria-label="On this page"><b>ON THIS PAGE</b><a href="#v120">1.2.0</a><a href="#v110">1.1.0</a><a href="#which">Which file?</a></aside><article class="doc">
+<h1>Releases</h1>
+<p class="intro">Always get the newest version from <a href="https://github.com/bloodrive65/live-recording-analyzer/releases/latest">the latest release on GitHub</a>. Installers are built automatically from the public source code.</p>
+
+<div class="rel" id="v120"><header><h2>1.2.0</h2><span class="pill" style="color:var(--ok)">LATEST</span><span class="date">October 2026</span></header>
+<p>New name: <b>Live Recording Analyzer</b> (previously “OBS Session Analyzer”), with a new icon.</p>
+<ul>
+<li><b>Guided setup:</b> on first launch the app asks whether you'd like help, with a “Remember my choice” option. It checks OBS, the WebSocket connection, the recording drive, the GPU and HDR on <em>this</em> PC.</li>
+<li><b>“Check OBS settings”</b> replaces “Run pre-flight check,” and shows progress while it works.</li>
+<li><b>Live OBS connection status</b> on the Settings tab (Connected, OBS not running, WebSocket off, or Password rejected) with a Check again button. It updates on its own after you change OBS.</li>
+<li><b>More accurate advice:</b> menu paths checked against current OBS. An audio sample-rate difference is no longer a warning, because OBS converts it automatically. It's only flagged if it actually causes delays. Wording now works for any setup.</li>
+<li><b>Lighter:</b> new Light resource mode, the app's own CPU and memory shown in the status bar, and lower-priority analysis and deep scans.</li>
+<li>Port arrows on the Settings tab are now easy to see.</li>
+</ul>
+<div class="dl"><a class="btn primary" href="https://github.com/bloodrive65/live-recording-analyzer/releases/tag/v1.2.0">Download 1.2.0</a></div></div>
+
+<div class="rel" id="v110"><header><h2>1.1.0</h2><span class="date">October 2026</span></header>
+<p>First public version, released as “OBS Session Analyzer.”</p>
+<ul><li>Live Advisor with Windows pop-ups and Pause/Resume buttons</li><li>Pre-recording settings check</li><li>Automatic report after each recording, with timeline, likely causes and deep scan</li><li>Analyze tab for older recordings and single video files</li></ul>
+<div class="dl"><a class="btn" href="https://github.com/bloodrive65/live-recording-analyzer/releases/tag/v1.1.0">Download 1.1.0</a></div></div>
+
+<h2 id="which">Which file should I download?</h2>
+<div class="table-wrap"><table>
+<tr><th>File</th><th>Use it when</th></tr>
+<tr><td><b>Live-Recording-Analyzer-Setup-x.y.z.exe</b></td><td>You want a normal install with Start menu and desktop shortcuts. Recommended.</td></tr>
+<tr><td><b>Live-Recording-Analyzer-Portable-x.y.z.zip</b></td><td>You don't want to install anything. Extract the zip and run the .exe. Good for USB sticks.</td></tr>
+</table></div>
+</article></div></main>
+<footer><div class="wrap">
+<div>Live Recording Analyzer is free and runs entirely on your PC.<br>It is an independent project and is not made by, affiliated with, or endorsed by the OBS Project. “OBS” and “OBS Studio” are used only to describe compatibility.</div>
+<div><a href="https://github.com/bloodrive65/live-recording-analyzer">Source code on GitHub</a> · <a href="https://github.com/bloodrive65/live-recording-analyzer/issues">Report a problem</a> · <a href="releases.html">Releases</a></div>
+</div></footer>
+<script src="assets/site.js" defer></script>
+</body></html>

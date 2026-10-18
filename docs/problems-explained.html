@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Problems explained · Live Recording Analyzer</title>
+<meta name="description" content="What each Live Recording Analyzer message means, whether it actually matters, and the exact OBS or Windows setting to change.">
+<meta property="og:title" content="Problems explained · Live Recording Analyzer"><meta property="og:description" content="What each Live Recording Analyzer message means, whether it actually matters, and the exact OBS or Windows setting to change.">
+<meta property="og:image" content="https://bloodrive65.github.io/live-recording-analyzer/assets/logo-512.png">
+<link rel="icon" href="assets/logo.svg" type="image/svg+xml"><link rel="icon" href="assets/favicon-32.png" sizes="32x32">
+<link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&family=Sora:wght@600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/site.css">
+</head><body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="top"><div class="wrap">
+<a class="brand" href="index.html"><img src="assets/logo.svg" alt="" width="32" height="32">Live Recording Analyzer</a>
+<button class="menu-btn" aria-label="Menu" aria-expanded="false" aria-controls="nav">&#9776;</button>
+<nav class="nav" id="nav" aria-label="Main"><a href="index.html">Home</a><a href="getting-started.html">Getting started</a><a href="using-the-app.html">Using the app</a><a href="problems-explained.html" aria-current=page>Problems explained</a><a href="faq.html">FAQ & fixes</a><a href="releases.html">Releases</a></nav>
+</div></header>
+<main id="main"><div class="wrap page"><aside class="toc" aria-label="On this page"><b>ON THIS PAGE</b><a href="#frames">Lost frames</a><a href="#settings">Settings</a><a href="#capture">Capture sources</a><a href="#audio">Audio</a><a href="#drive">Recording drive</a><a href="#system">PC and drivers</a></aside><article class="doc">
+<h1>Problems explained</h1>
+<p class="intro">Every message the app can show, what it really means for your recording, and where the setting lives in OBS. The menu names below are from OBS Studio 30–32. Older versions are very similar.</p>
+<div class="note"><p><b>How the app decides how serious something is:</b> it only shows a <b>warning</b> or <b>critical</b> message when something will visibly or audibly affect your recording. It looks at your actual hardware and settings, not just general rules. Issues that OBS handles on its own are shown as tips, or not shown at all.</p></div>
+
+<h2 id="frames">Lost frames</h2>
+<h3 id="encoding-lag">Frames skipped due to encoding lag <span class="pill" style="color:var(--warn)">WARNING</span></h3>
+<p><b>What it means:</b> The video encoder (for example NVIDIA NVENC, AMD or Intel) couldn't keep up, so OBS threw frames away. In the file they usually show up as repeated frames, which look like a small hitch.</p><p><b>Does it matter?</b> Yes. Even 0.1% is about one hitch every 17 seconds at 60 fps.</p><p><b>How to fix it:</b></p><ul><li>If the message says the <b>video encoder is at its limit</b>, use a faster encoder preset (<span class="path">Settings → Output → Recording → Preset</span> with Output Mode set to Advanced), lower the output resolution or frame rate, or close other programs that use the encoder (another recorder, NVIDIA Instant Replay, or a second OBS).</li>
+<li>If it says the <b>recording drive was struggling</b>, see <a href="#drive">Recording drive</a>.</li>
+<li>If the <b>GPU was at 95–100%</b> from the game, cap the game's frame rate a little below your monitor's refresh rate, or lower a graphics setting. The game is taking all of the GPU's time.</li></ul>
+<h3 id="render-lag">Frames missed due to rendering lag <span class="pill" style="color:var(--warn)">WARNING</span></h3>
+<p><b>What it means:</b> OBS couldn't draw (render) the frame in time, usually because the game was using all of the GPU.</p><p><b>Does it matter?</b> Yes. These frames are missing from the recording.</p><p><b>How to fix it:</b></p><ul><li>Cap the game's frame rate (in-game setting, or the NVIDIA/AMD control panel).</li><li>Run OBS as administrator so Windows gives it GPU priority. Right-click OBS → <b>Run as administrator</b>.</li><li>Reduce the number of sources and filters in your scene, especially browser sources and heavy filters.</li></ul>
+<h3 id="repeats">Repeated frames every ~17 seconds <span class="pill" style="color:var(--warn)">WARNING</span></h3>
+<p><b>What it means:</b> The deep scan found a duplicated frame at a steady interval. This almost always means your source runs at 59.94 fps and OBS at 60 fps, or the other way around.</p><p><b>Does it matter?</b> Yes. It causes a regular micro-stutter in the video.</p><p><b>How to fix it:</b></p><p>Make the source and OBS use the same frame rate. See <a href="#fps-mismatch">Frame-rate mismatch</a>.</p>
+<h3 id="file-stall">The recording file has stopped growing <span class="pill" style="color:var(--bad)">CRITICAL</span></h3>
+<p><b>What it means:</b> OBS says it's recording, but no new data has reached the file for several seconds.</p><p><b>Does it matter?</b> Yes, badly. The recording may end up cut off or damaged.</p><p><b>How to fix it:</b></p><ul><li>Check that the drive is still connected. USB drives and enclosures can disconnect briefly.</li><li>If the drive is a hard drive, it may have gone to sleep. In <span class="path">Control Panel → Power Options → Change plan settings → Change advanced power settings</span>, set <b>Hard disk → Turn off hard disk after</b> to <b>Never</b>.</li><li>Stop the recording and start a new one on an internal SSD if the problem continues.</li></ul>
+
+<h2 id="settings">Settings</h2>
+<h3 id="fps-mismatch">Frame-rate mismatch between a capture source and OBS <span class="pill" style="color:var(--warn)">WARNING</span></h3>
+<p><b>What it means:</b> A capture card or camera delivers, for example, 59.94 fps while OBS records at 60 fps.</p><p><b>Does it matter?</b> Yes. You get a repeated or dropped frame every ~17 seconds (59.94 vs 60), or worse for bigger gaps.</p><p><b>How to fix it:</b></p><p>Pick <b>one</b> of these:</p><ol><li>Double-click the <b>Video Capture Device</b> source → set <b>Resolution/FPS Type</b> to <b>Custom</b> → set <b>FPS</b> to the same value as OBS (for example <b>60</b>), or choose <b>Match Output FPS</b>.</li><li>Or change OBS to match the source: <span class="path">Settings → Video → Common FPS Values</span> → <b>59.94</b>.</li></ol><div class="note"><p>Many consoles and capture cards really output 59.94 fps. If the source is 59.94, setting OBS to 59.94 is the cleanest fix.</p></div>
+<h3 id="color-range">Color range is set to Full <span class="pill" style="color:var(--warn)">WARNING</span></h3>
+<p><b>What it means:</b> OBS is writing “Full” range video. Most players, editors and video sites expect “Limited” range.</p><p><b>Does it matter?</b> Usually yes. Full range is often shown with crushed blacks or washed-out colors after upload or in editors.</p><p><b>How to fix it:</b></p><p><span class="path">Settings → Advanced → Video → Color Range</span> → <b>Limited</b>. Click <b>Apply</b> before recording. Choose Full only if your whole editing chain is set up for it.</p>
+<h3 id="bitdepth">Encoder profile is 10-bit but OBS sends 8-bit pictures <span class="pill" style="color:var(--tip)">TIP</span></h3>
+<p><b>What it means:</b> The encoder profile is set to a 10-bit profile (such as <b>main10</b>), while {P('Settings → Advanced → Video → Color Format')} is an 8-bit format such as <b>NV12</b>.</p><p><b>Does it matter?</b> Not harmful. The file is a little larger, and some older editors, phones and TVs can't play 10-bit files. It doesn't add any color quality.</p><p><b>How to fix it:</b></p><ul><li>For normal (SDR) recording: <span class="path">Settings → Output → Recording → Profile</span> → <b>main</b> (Output Mode: Advanced).</li><li>For real 10-bit or HDR recording, keep main10 and set <span class="path">Settings → Advanced → Video → Color Format</span> → <b>P010</b>. For HDR, also set <b>Color Space</b> → <b>Rec. 2100 (PQ)</b>.</li></ul>
+<h3 id="file-mismatch">The file doesn't match your settings <span class="pill" style="color:var(--warn)">WARNING</span></h3>
+<p><b>What it means:</b> About 25 seconds into a recording, the app opens the file and compares its resolution, frame rate and color settings with OBS.</p><p><b>Does it matter?</b> Yes. You're recording something different from what you intended.</p><p><b>How to fix it:</b></p><p>The message lists exactly which value differs. Stop, fix that setting, and start a new recording. It's quicker than fixing it later.</p>
+
+<h2 id="capture">Capture sources</h2>
+<h3 id="hdr">Windows HDR is on and a screen capture isn't set to SDR <span class="pill" style="color:var(--tip)">TIP</span></h3>
+<p><b>What it means:</b> With Windows HDR on, <b>Display Capture</b> and <b>Window Capture</b> can look dim or washed out in an SDR recording.</p><p><b>Does it matter?</b> Only if you capture your PC screen. Capture cards aren't affected.</p><p><b>How to fix it:</b></p><ul><li>Double-click the Display Capture or Window Capture source → tick <b>Force SDR</b>. In Display Capture this appears with the “Windows 10 (1903 and up)” capture method.</li><li>Or turn off HDR in <span class="path">Windows Settings → System → Display → Use HDR</span> while recording.</li><li>Game Capture handles HDR games on its own. If an HDR game looks wrong, open its properties and check <b>Color Space</b> at the bottom.</li></ul>
+<h3 id="buffering">Audio arrived late — OBS added audio buffering <span class="pill" style="color:var(--warn)">WARNING</span></h3>
+<p><b>What it means:</b> A source's audio reached OBS later than expected, so OBS added a delay to keep everything in step.</p><p><b>Does it matter?</b> Sometimes. Audio can be briefly out of sync around that moment, and the delay stays until OBS restarts.</p><p><b>How to fix it:</b></p><ul><li>Restart OBS before long recordings if this happens often.</li><li>For capture cards, try <span class="path">Video Capture Device properties → Buffering</span> → <b>Disable</b>, or use the card's audio as a separate <b>Audio Input Capture</b> source.</li><li>Remove or fix sources that freeze, such as browser sources with errors or disconnected cameras.</li></ul>
+
+<h2 id="audio">Audio</h2>
+<h3 id="sample-rate">A device uses a different audio sample rate than OBS (for example 44.1 kHz vs 48 kHz) <span class="pill" style="color:var(--muted)">INFO</span></h3>
+<p><b>What it means:</b> One device reports a different sample rate than OBS.</p><p><b>Does it matter?</b> <b>Normally no.</b> OBS converts (resamples) the audio automatically. The app only warns about this when it also sees audio delays or gaps from that same device during a recording.</p><p><b>How to fix it:</b></p><p>Only if you get a warning about that device:</p><ul><li>Many capture devices don't have a sample-rate setting in OBS. If the device appears in Windows as a microphone or line-in, set its rate in <span class="path">Windows Settings → System → Sound → (device) → Format</span>, or in <span class="path">Control Panel → Sound → Recording → (device) → Properties → Advanced → Default Format</span>, to <b>48000 Hz</b>.</li><li>Your OBS rate is in <span class="path">Settings → Audio → General → Sample Rate</span>. 48 kHz is the standard for video.</li></ul>
+
+<h2 id="drive">Recording drive</h2>
+<h3 id="drive-stall">Recording drive is stalling / slow writes <span class="pill" style="color:var(--warn)">WARNING</span></h3>
+<p><b>What it means:</b> Windows reports that each write to the recording drive is taking a long time (hundreds of milliseconds instead of a few).</p><p><b>Does it matter?</b> Yes. OBS can absorb short stalls, but long ones cause skipped frames or a stopped file.</p><p><b>How to fix it:</b></p><ul><li>Record to an internal SSD (NVMe or SATA) rather than a USB hard drive or network drive, then move files afterward.</li><li>Pause cloud sync, backups or antivirus scans that use the same drive while recording.</li><li>For USB drives, plug directly into a rear USB port on the motherboard instead of a hub.</li></ul>
+<h3 id="space">Recording drive is running out of space <span class="pill" style="color:var(--bad)">CRITICAL</span></h3>
+<p><b>What it means:</b> Based on how fast the file is growing, the app estimates how many minutes of space are left.</p><p><b>Does it matter?</b> Yes. When the drive fills up, the recording stops.</p><p><b>How to fix it:</b></p><ul><li>Free up space, or stop and continue recording on another drive. To change the recording folder, go to Settings → Output → Recording → Recording Path in OBS.</li></ul>
+
+<h2 id="system">PC and drivers</h2>
+<h3 id="gpu-reset">Graphics driver reset (Windows event) <span class="pill" style="color:var(--bad)">CRITICAL</span></h3>
+<p><b>What it means:</b> Windows logged that the graphics driver stopped responding and recovered.</p><p><b>Does it matter?</b> Yes. This usually causes a freeze or a large gap in the recording.</p><p><b>How to fix it:</b></p><ul><li>Update the graphics driver with a clean install.</li><li>Undo any GPU overclock or undervolt.</li><li>Check GPU temperature in the report. The app warns when it's high.</li></ul>
+<h3 id="usb">USB or disk error (Windows event) <span class="pill" style="color:var(--warn)">WARNING</span></h3>
+<p><b>What it means:</b> Windows logged a USB disconnect, reset, or disk error near the time of a problem.</p><p><b>Does it matter?</b> Yes, if it lines up with skipped frames or a file stall.</p><p><b>How to fix it:</b></p><ul><li>Try a different cable or port, preferably a rear motherboard port. Avoid hubs for capture cards and recording drives.</li><li>Turn off USB selective suspend: <b>Power Options → Change advanced power settings → USB settings</b>.</li></ul>
+<p>Don't see a message here? <a href="faq.html">Check the FAQ</a> or <a href="https://github.com/bloodrive65/live-recording-analyzer/issues">report it on GitHub</a>.</p>
+</article></div></main>
+<footer><div class="wrap">
+<div>Live Recording Analyzer is free and runs entirely on your PC.<br>It is an independent project and is not made by, affiliated with, or endorsed by the OBS Project. “OBS” and “OBS Studio” are used only to describe compatibility.</div>
+<div><a href="https://github.com/bloodrive65/live-recording-analyzer">Source code on GitHub</a> · <a href="https://github.com/bloodrive65/live-recording-analyzer/issues">Report a problem</a> · <a href="releases.html">Releases</a></div>
+</div></footer>
+<script src="assets/site.js" defer></script>
+</body></html>

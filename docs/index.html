@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Live Recording Analyzer — catches recording problems while you play</title>
+<meta name="description" content="A free Windows app that watches OBS Studio while you record and tells you, in plain language, what went wrong and how to fix it — before, during and after recording.">
+<meta property="og:title" content="Live Recording Analyzer — catches recording problems while you play"><meta property="og:description" content="A free Windows app that watches OBS Studio while you record and tells you, in plain language, what went wrong and how to fix it — before, during and after recording.">
+<meta property="og:image" content="https://bloodrive65.github.io/live-recording-analyzer/assets/logo-512.png">
+<link rel="icon" href="assets/logo.svg" type="image/svg+xml"><link rel="icon" href="assets/favicon-32.png" sizes="32x32">
+<link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&family=Sora:wght@600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/site.css">
+</head><body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="top"><div class="wrap">
+<a class="brand" href="index.html"><img src="assets/logo.svg" alt="" width="32" height="32">Live Recording Analyzer</a>
+<button class="menu-btn" aria-label="Menu" aria-expanded="false" aria-controls="nav">&#9776;</button>
+<nav class="nav" id="nav" aria-label="Main"><a href="index.html" aria-current=page>Home</a><a href="getting-started.html">Getting started</a><a href="using-the-app.html">Using the app</a><a href="problems-explained.html">Problems explained</a><a href="faq.html">FAQ & fixes</a><a href="releases.html">Releases</a></nav>
+</div></header>
+<main id="main">
+<section class="hero"><div class="wrap">
+<div>
+<div class="eyebrow">Free · Windows 10 / 11 · Works with OBS Studio 28+</div>
+<h1>Know your recording is good <em>before</em> you find out the hard way.</h1>
+<p class="lead">Live Recording Analyzer watches OBS while you play. When frames are dropped, a drive stalls or a setting doesn't match, it tells you right away with a pop-up and explains what caused it and how to fix it, step by step.</p>
+<div class="cta">
+<a class="btn primary" href="https://github.com/bloodrive65/live-recording-analyzer/releases/latest">Download for Windows</a>
+<a class="btn" href="getting-started.html">Getting started</a>
+</div>
+<p class="fine">Includes an installer and a portable zip. No account, no internet connection needed, nothing is uploaded.</p>
+</div>
+<div class="mock" role="img" aria-label="Example of the Advisor message feed during a recording">
+<div class="mock-bar"><span class="dot"></span><b>Recording — 00:31:12</b><span>OBS connected</span></div>
+<div class="msg c-warn"><div class="k">WARNING · video 00:31:08</div><div class="t">4 frames skipped — encoding lag</div><div class="b">Likely cause: the recording drive was struggling (100% busy, 1.3 s per write).</div><span class="act">Pause recording</span></div>
+<div class="msg c-bad"><div class="k">CRITICAL</div><div class="t">The recording file has stopped growing</div><div class="b">No data written for 7 s. The drive may have disconnected or gone to sleep.</div></div>
+<div class="msg c-tip"><div class="k">TIP · before recording</div><div class="t">Capture card is at 59.94 fps but OBS is at 60 fps</div><div class="b">This makes a small stutter about every 17 seconds.</div></div>
+<div class="msg c-ok"><div class="k">AFTER RECORDING</div><div class="t">Report ready — 2 things to look at</div><div class="b">Timeline with timestamps and likely causes.</div><span class="act">Open report</span></div>
+</div>
+</div></section>
+
+<section class="alt"><div class="wrap">
+<div class="sec-h"><div class="eyebrow">How it helps</div><h2>Before, during and after every recording</h2>
+<p>You don't have to watch the app. It runs quietly in the background and only speaks up when something actually matters.</p></div>
+<div class="grid3">
+<div class="card"><div class="phase">BEFORE</div><h3>Check OBS settings</h3>
+<p>One click reads your OBS profile, scenes and last log, and lists anything that will cause trouble:</p>
+<ul><li>Frame-rate mismatches between your capture source and OBS</li><li>Color range, color format and encoder bit-depth conflicts</li><li>HDR screen captures without Force SDR</li><li>A slow, external or nearly full recording drive</li></ul></div>
+<div class="card"><div class="phase">DURING</div><h3>Live Advisor</h3>
+<p>Checks once per second and sends a Windows pop-up when there's a problem:</p>
+<ul><li>Skipped and dropped frames, with the likely cause at that moment (GPU, encoder, CPU, drive, temperature)</li><li>Drive stalls, low free space, a file that stopped growing</li><li>Audio delays and buffering changes</li><li>Checks the file itself 25 seconds in, so you can fix mistakes early</li></ul></div>
+<div class="card"><div class="phase">AFTER</div><h3>Report with timestamps</h3>
+<p>When you stop recording it analyzes the recording on its own:</p>
+<ul><li>Every problem with the clock time <em>and</em> the position in the video</li><li>OBS settings compared to what the file really contains</li><li>Optional deep scan for repeated or frozen frames</li><li>Windows events such as GPU driver resets or USB disconnects</li></ul></div>
+</div>
+</div></section>
+
+<section><div class="wrap grid2">
+<div><div class="eyebrow">Lightweight</div><h2 style="font-size:clamp(24px,3vw,32px);margin:6px 0 10px">Made to stay out of your game's way</h2>
+<p style="color:#c3c8d2">It runs at low priority and reads the counters Windows already keeps, about once a second. It doesn't capture your screen, inject into games or hook into OBS. The status bar shows how much CPU and memory the app itself uses, so you can check for yourself. The heavier deep scan only runs when you ask for it, and it also runs at low priority.</p></div>
+<div><div class="eyebrow">Safe by design</div><h2 style="font-size:clamp(24px,3vw,32px);margin:6px 0 10px">Recommends, never changes</h2>
+<p style="color:#c3c8d2">The app never changes your OBS settings. It tells you exactly where each setting lives in OBS and what to choose. The only thing it can do in OBS is pause or resume your recording, and only when you click that button. Everything stays on your PC.</p></div>
+</div></section>
+
+<section class="alt"><div class="wrap">
+<div class="sec-h"><div class="eyebrow">Start in three steps</div><h2>Up and running in a few minutes</h2></div>
+<ol class="steps">
+<li><b>Install it.</b> Download the installer from <a href="https://github.com/bloodrive65/live-recording-analyzer/releases/latest">the latest release</a> and run it. Windows may warn you because the app isn't digitally signed yet. <a href="faq.html#smartscreen">Here's why it's safe and how to continue.</a></li>
+<li><b>Let the guided setup check your PC.</b> The first time you open the app, it asks if you'd like guided setup. It finds OBS, helps you turn on the connection it needs, and checks your recording drive and graphics card.</li>
+<li><b>Click “Start watching,” then play.</b> Record in OBS as you normally would. If something goes wrong you'll get a pop-up, and when you stop recording a report appears in the app.</li>
+</ol>
+<div class="cta"><a class="btn primary" href="getting-started.html">Read the full guide</a><a class="btn" href="problems-explained.html">What the messages mean</a></div>
+</div></section>
+</main>
+<footer><div class="wrap">
+<div>Live Recording Analyzer is free and runs entirely on your PC.<br>It is an independent project and is not made by, affiliated with, or endorsed by the OBS Project. “OBS” and “OBS Studio” are used only to describe compatibility.</div>
+<div><a href="https://github.com/bloodrive65/live-recording-analyzer">Source code on GitHub</a> · <a href="https://github.com/bloodrive65/live-recording-analyzer/issues">Report a problem</a> · <a href="releases.html">Releases</a></div>
+</div></footer>
+<script src="assets/site.js" defer></script>
+</body></html>

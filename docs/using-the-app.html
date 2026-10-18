@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Using the app · Live Recording Analyzer</title>
+<meta name="description" content="Every tab, button and message type in Live Recording Analyzer, explained.">
+<meta property="og:title" content="Using the app · Live Recording Analyzer"><meta property="og:description" content="Every tab, button and message type in Live Recording Analyzer, explained.">
+<meta property="og:image" content="https://bloodrive65.github.io/live-recording-analyzer/assets/logo-512.png">
+<link rel="icon" href="assets/logo.svg" type="image/svg+xml"><link rel="icon" href="assets/favicon-32.png" sizes="32x32">
+<link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&family=Sora:wght@600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/site.css">
+</head><body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="top"><div class="wrap">
+<a class="brand" href="index.html"><img src="assets/logo.svg" alt="" width="32" height="32">Live Recording Analyzer</a>
+<button class="menu-btn" aria-label="Menu" aria-expanded="false" aria-controls="nav">&#9776;</button>
+<nav class="nav" id="nav" aria-label="Main"><a href="index.html">Home</a><a href="getting-started.html">Getting started</a><a href="using-the-app.html" aria-current=page>Using the app</a><a href="problems-explained.html">Problems explained</a><a href="faq.html">FAQ & fixes</a><a href="releases.html">Releases</a></nav>
+</div></header>
+<main id="main"><div class="wrap page"><aside class="toc" aria-label="On this page"><b>ON THIS PAGE</b><a href="#live">Live tab</a><a href="#advisor">Advisor messages</a><a href="#buttons">Message buttons</a><a href="#analyze">Analyze tab</a><a href="#report">The report</a><a href="#deep">Deep scan</a><a href="#settings">Settings tab</a><a href="#data">Where files are saved</a></aside><article class="doc">
+<h1>Using the app</h1>
+<p class="intro">The app has five tabs: <b>Live</b>, <b>Analyze</b>, <b>Reports</b>, <b>Settings</b> and <b>Help</b>. Most of the time you only need Live.</p>
+
+<h2 id="live">Live tab</h2>
+<p>The banner at the top shows what's happening right now:</p>
+<div class="table-wrap"><table>
+<tr><th>Light</th><th>Meaning</th></tr>
+<tr><td><span class="pill" style="color:var(--faint)">GRAY</span></td><td>Not watching. Click <b>Start watching</b>.</td></tr>
+<tr><td><span class="pill" style="color:var(--ok)">GREEN</span></td><td>Watching, but OBS isn't recording yet (or recording has stopped)</td></tr>
+<tr><td><span class="pill" style="color:var(--bad)">RED</span></td><td>OBS is recording. The recording time is shown next to it.</td></tr>
+<tr><td><span class="pill" style="color:var(--warn)">AMBER</span></td><td>The recording is paused</td></tr>
+</table></div>
+<p><b>Check OBS settings</b> reads your current OBS setup and reports problems before you record. You can use it at any time, even when you're not watching.</p>
+<p><b>Start watching / Stop watching</b> turns live monitoring on or off. You can start it before opening OBS, and it connects when OBS appears.</p>
+<p>The row of tiles shows live numbers: recording status, frames lost to rendering lag and encoding lag, OBS frame rate, GPU load, video-encoder load, CPU and the recording drive.</p>
+
+<h2 id="advisor">Advisor messages</h2>
+<p>Each message shows its type, the time, which phase it belongs to (before, during or after recording), and the position in the video when that applies.</p>
+<div class="table-wrap"><table>
+<tr><th>Type</th><th>What it means</th><th>Pop-up?</th></tr>
+<tr><td><span class="pill" style="color:var(--bad)">CRITICAL</span></td><td>Your recording is being damaged right now, or soon will be (for example, the drive stopped writing or space is running out)</td><td>Always, unless pop-ups are off</td></tr>
+<tr><td><span class="pill" style="color:var(--warn)">WARNING</span></td><td>A real problem that affects quality, such as lost frames or a setting that will cause visible issues</td><td>With the recommended setting</td></tr>
+<tr><td><span class="pill" style="color:var(--req)">NEEDS YOU</span></td><td>The app needs something from you, such as a file it couldn't find</td><td>With the recommended setting</td></tr>
+<tr><td><span class="pill" style="color:var(--tip)">TIP</span></td><td>Worth improving, but not harmful to this recording</td><td>No</td></tr>
+<tr><td><span class="pill" style="color:var(--ok)">GOOD</span> / <span class="pill" style="color:var(--muted)">STATUS</span></td><td>Everything is fine, or a simple status update</td><td>No</td></tr>
+</table></div>
+<p>If the same problem keeps happening, the app updates one message and counts the repeats (for example “×12”) instead of flooding the feed. Use <b>Problems and requests only</b> to hide tips and status messages.</p>
+
+<h2 id="buttons">Message buttons</h2>
+<ul>
+<li><b>Show what to do / Hide steps</b> shows or hides numbered steps that point to the exact OBS or Windows setting.</li>
+<li><b>Pause recording / Resume recording</b> pauses OBS so you can fix something without starting a new file. This only works while connected to OBS.</li>
+<li><b>Open report</b> opens the full report in your web browser.</li>
+<li><b>Run deep scan</b> scans the whole video frame by frame. See <a href="#deep">Deep scan</a>.</li>
+<li><b>Locate file / Browse for log</b> appears when the app couldn't find a recording or OBS log, so you can point it to the right file.</li>
+<li><b>Dismiss</b> removes the message.</li>
+</ul>
+
+<h2 id="analyze">Analyze tab</h2>
+<p>Use this to check older recordings, or recordings made without watching turned on.</p>
+<ol class="steps">
+<li>Choose an OBS log. The newest ones are listed automatically. They are also in OBS under <span class="path">Help → Log Files → Show Log Files</span>.</li>
+<li>Tick the recordings you want to check. If a file has been moved, click <b>Locate</b> to point to it.</li>
+<li>If you had watching turned on during that recording, choose its session so the report can show what the PC was doing.</li>
+<li>Click <b>Analyze</b>. To check a video without a log, use <b>Check a video file only</b>.</li>
+</ol>
+
+<h2 id="report">The report</h2>
+<p>Reports open in your web browser and are saved as single HTML files you can keep or share. They contain:</p>
+<ul>
+<li><b>Verdict and key findings</b>, each with why it matters and how to fix it</li>
+<li><b>Timeline</b> of every incident, with clock time and video position, plus the likely cause based on what the PC was doing at that second</li>
+<li><b>Chart</b> of skipped frames against GPU, encoder, CPU and drive load</li>
+<li><b>Settings check</b> comparing OBS settings with what the file really contains</li>
+<li><b>Windows events</b> such as GPU driver resets, disk errors or USB disconnects</li>
+<li>A short <b>glossary</b> of the terms used</li>
+</ul>
+
+<h2 id="deep">Deep scan</h2>
+<p>A normal check reads the file's timestamps and takes seconds. A deep scan decodes every frame to find repeated or frozen frames. These are what lost frames often look like inside the file, along with the regular stutter caused by frame-rate mismatches.</p>
+<p>It takes about 5–20 minutes per hour of 4K video and runs at low priority. Avoid starting one right before you play a demanding game.</p>
+
+<h2 id="settings">Settings tab</h2>
+<ul>
+<li><b>OBS connection:</b> a live status light (Connected, OBS not running, WebSocket off, or Password rejected) with a <b>Check again</b> button. The port and password are filled in from OBS automatically.</li>
+<li><b>Alerts while you play:</b> pop-ups for critical problems only, for warnings and critical (recommended), or off, plus an optional sound. Pop-ups are limited to one every 30 seconds, except critical ones.</li>
+<li><b>Resource use:</b> Normal checks once per second, and Light checks every 2 seconds and collects less detail.</li>
+<li><b>Behavior:</b> start watching when the app opens, keep running in the tray, and analyze automatically when a recording stops.</li>
+<li><b>Run guided setup</b> starts the setup walkthrough again.</li>
+</ul>
+
+<h2 id="data">Where files are saved</h2>
+<p>Everything is in <span class="path">Documents\Live Recording Analyzer</span>:</p>
+<ul>
+<li><b>Sessions</b> holds per-second PC data from each watching session. It's small: about 1–2 MB per hour.</li>
+<li><b>Reports</b> holds the HTML reports.</li>
+<li><b>settings.json</b> holds your choices.</li>
+</ul>
+</article></div></main>
+<footer><div class="wrap">
+<div>Live Recording Analyzer is free and runs entirely on your PC.<br>It is an independent project and is not made by, affiliated with, or endorsed by the OBS Project. “OBS” and “OBS Studio” are used only to describe compatibility.</div>
+<div><a href="https://github.com/bloodrive65/live-recording-analyzer">Source code on GitHub</a> · <a href="https://github.com/bloodrive65/live-recording-analyzer/issues">Report a problem</a> · <a href="releases.html">Releases</a></div>
+</div></footer>
+<script src="assets/site.js" defer></script>
+</body></html>

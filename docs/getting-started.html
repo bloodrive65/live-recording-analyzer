@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Getting started · Live Recording Analyzer</title>
+<meta name="description" content="Install Live Recording Analyzer, run guided setup and connect it to OBS Studio.">
+<meta property="og:title" content="Getting started · Live Recording Analyzer"><meta property="og:description" content="Install Live Recording Analyzer, run guided setup and connect it to OBS Studio.">
+<meta property="og:image" content="https://bloodrive65.github.io/live-recording-analyzer/assets/logo-512.png">
+<link rel="icon" href="assets/logo.svg" type="image/svg+xml"><link rel="icon" href="assets/favicon-32.png" sizes="32x32">
+<link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&family=Sora:wght@600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/site.css">
+</head><body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="top"><div class="wrap">
+<a class="brand" href="index.html"><img src="assets/logo.svg" alt="" width="32" height="32">Live Recording Analyzer</a>
+<button class="menu-btn" aria-label="Menu" aria-expanded="false" aria-controls="nav">&#9776;</button>
+<nav class="nav" id="nav" aria-label="Main"><a href="index.html">Home</a><a href="getting-started.html" aria-current=page>Getting started</a><a href="using-the-app.html">Using the app</a><a href="problems-explained.html">Problems explained</a><a href="faq.html">FAQ & fixes</a><a href="releases.html">Releases</a></nav>
+</div></header>
+<main id="main"><div class="wrap page"><aside class="toc" aria-label="On this page"><b>ON THIS PAGE</b><a href="#requirements">Requirements</a><a href="#install">Install</a><a href="#guided">Guided setup</a><a href="#websocket">Connect to OBS</a><a href="#popups">Pop-ups over games</a><a href="#first">Your first recording</a><a href="#uninstall">Update or uninstall</a></aside><article class="doc">
+<h1>Getting started</h1>
+<p class="intro">This guide takes about five minutes. You only need to do it once.</p>
+
+<h2 id="requirements">Requirements</h2>
+<ul>
+<li>Windows 10 or Windows 11 (64-bit)</li>
+<li>OBS Studio 28 or newer. The connection feature it uses is built into OBS 28 and later.</li>
+<li>About 300 MB of disk space. The app includes FFmpeg, which it uses to check your video files.</li>
+<li>Any graphics card. NVIDIA cards also report GPU temperature and video-encoder load.</li>
+</ul>
+
+<h2 id="install">Install</h2>
+<ol class="steps">
+<li>Open <a href="https://github.com/bloodrive65/live-recording-analyzer/releases/latest">the latest release</a> and download <b>Live-Recording-Analyzer-Setup-x.y.z.exe</b>. If you'd rather not install anything, download the <b>Portable</b> zip, extract it, and run <b>Live Recording Analyzer.exe</b>.</li>
+<li>Run the installer. If Windows shows “Windows protected your PC,” click <b>More info</b>, then <b>Run anyway</b>. This appears because the app isn't digitally signed yet. <a href="faq.html#smartscreen">More about this.</a></li>
+<li>Choose whether you want a desktop shortcut and whether the app should start with Windows. It installs for your user account only, so it doesn't need administrator rights.</li>
+</ol>
+<div class="note"><p><b>Upgrading from “OBS Session Analyzer” 1.1.0?</b> The new installer replaces it automatically and keeps your settings, sessions and reports.</p></div>
+
+<h2 id="guided">Guided setup</h2>
+<p>The first time you open the app, it asks: <b>“Would you like guided setup?”</b></p>
+<ul>
+<li><b>Yes, guide me:</b> a short walkthrough that checks this PC and shows only what needs attention. Recommended if you're not sure what to look for.</li>
+<li><b>No, I'll set it up myself:</b> go straight to the app. Everything is also on the <b>Settings</b> tab.</li>
+<li>Tick <b>Remember my choice</b> if you don't want to be asked again. You can always start it later from <b>Settings → Run guided setup</b>.</li>
+</ul>
+<p>Guided setup checks:</p>
+<div class="table-wrap"><table>
+<tr><th>Check</th><th>What it looks for</th></tr>
+<tr><td>OBS Studio</td><td>Whether OBS is installed, which version, and whether it's running</td></tr>
+<tr><td>Connection to OBS</td><td>Whether the OBS WebSocket server is on, and whether the app can actually connect</td></tr>
+<tr><td>Recording folder</td><td>Which drive OBS records to, whether it's internal, USB or network, whether it's an SSD or hard drive, and how many hours of space are left</td></tr>
+<tr><td>Graphics card and encoder</td><td>Your GPU and whether OBS is using its hardware encoder</td></tr>
+<tr><td>Displays and HDR</td><td>Whether Windows HDR is on, which affects how screen captures look</td></tr>
+<tr><td>OBS settings</td><td>The same check as the “Check OBS settings” button</td></tr>
+<tr><td>Alerts</td><td>How you want to be told about problems while you play</td></tr>
+</table></div>
+
+<h2 id="websocket">Connect to OBS (one-time)</h2>
+<p>The app works best when it can talk to OBS directly. That lets it see each skipped frame the moment it happens and pause recording when you ask. OBS has this built in. You just have to turn it on:</p>
+<ol class="steps">
+<li>In OBS, open <span class="path">Tools → WebSocket Server Settings</span>.</li>
+<li>Tick <b>Enable WebSocket server</b>. Leave the port at <b>4455</b> unless you know you need something else.</li>
+<li>Click <b>OK</b>. OBS saves the setting when you close this window.</li>
+<li>In Live Recording Analyzer, the connection status turns green and shows <b>Connected to OBS</b> within a few seconds. You don't need to copy the password, because the app reads it from OBS automatically.</li>
+</ol>
+<div class="note" style="--c:var(--warn)"><p><b>Still showing “Not connected”?</b> Click <b>Check again</b> on the Settings tab. If it says the password was rejected, click <b>Show Connect Info</b> in the same OBS window, copy the password and paste it into the app. <a href="faq.html#connect">More fixes</a></p></div>
+<p>Without this connection the app still works: it reads the OBS log, watches your PC and checks the file. It just can't react the second a frame is skipped, or pause recording for you.</p>
+
+<h2 id="popups">Make sure pop-ups show up over games</h2>
+<p>Windows can hide notifications while a full-screen game is running. To get alerts while you play:</p>
+<ol class="steps">
+<li>Open <span class="path">Windows Settings → System → Notifications</span>.</li>
+<li>Make sure notifications are on, and that <b>Live Recording Analyzer</b> is allowed in the list of apps.</li>
+<li>Under <b>Turn on do not disturb automatically</b> (Windows 11), untick <b>When playing a game</b>, or add Live Recording Analyzer as a priority app.</li>
+</ol>
+<p>You can choose which alerts pop up, and whether they play a sound, under <b>Settings → Alerts while you play</b>.</p>
+
+<h2 id="first">Your first recording</h2>
+<ol class="steps">
+<li>Open OBS first, then Live Recording Analyzer.</li>
+<li>Click <b>Check OBS settings</b>. A progress bar shows while it reads OBS, then the results appear in the <b>Advisor</b>. Fix anything marked <span class="pill" style="color:var(--bad)">CRITICAL</span> or <span class="pill" style="color:var(--warn)">WARNING</span>.</li>
+<li>Click <b>Start watching</b>, then minimize the window. The app stays in the system tray.</li>
+<li>Start recording in OBS and play.</li>
+<li>Stop recording. A few seconds later the Advisor shows a summary with an <b>Open report</b> button.</li>
+</ol>
+<p>Next: <a href="using-the-app.html">Using the app</a>, which covers every tab and button.</p>
+
+<h2 id="uninstall">Update or uninstall</h2>
+<p><b>Update:</b> download the newest installer and run it. Your settings, sessions and reports stay in <span class="path">Documents\Live Recording Analyzer</span>.</p>
+<p><b>Uninstall:</b> go to <span class="path">Windows Settings → Apps → Installed apps → Live Recording Analyzer → Uninstall</span>. Your reports in Documents are kept, so delete that folder too if you don't want them.</p>
+</article></div></main>
+<footer><div class="wrap">
+<div>Live Recording Analyzer is free and runs entirely on your PC.<br>It is an independent project and is not made by, affiliated with, or endorsed by the OBS Project. “OBS” and “OBS Studio” are used only to describe compatibility.</div>
+<div><a href="https://github.com/bloodrive65/live-recording-analyzer">Source code on GitHub</a> · <a href="https://github.com/bloodrive65/live-recording-analyzer/issues">Report a problem</a> · <a href="releases.html">Releases</a></div>
+</div></footer>
+<script src="assets/site.js" defer></script>
+</body></html>
