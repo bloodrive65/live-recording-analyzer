@@ -51,3 +51,11 @@
 .rp-legend i{display:inline-block;width:14px;height:3px;border-radius:2px;margin-right:6px;vertical-align:middle}
 @media (max-width:640px){.rp h1{font-size:24px}.rp-kv{grid-template-columns:1fr;gap:0}.rp-kv div:nth-child(even){margin-bottom:8px}}
 @media print{.top,.rp-bar,footer{display:none}body{background:#fff;color:#000}}
+
+/* "Where it comes from" block in each finding */
+.rp-where { margin: 10px 0 12px; padding: 10px 12px; border: 1px solid var(--line, #2a2e37); border-left: 3px solid #5fa8ff; border-radius: 8px; background: rgba(95, 168, 255, .06); }
+.rp-where .h { font-size: 12px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: #8fc1ff; margin-bottom: 6px; }
+.rp-where dl { display: grid; grid-template-columns: minmax(110px, max-content) 1fr; gap: 4px 14px; margin: 0; }
+.rp-where dt { color: var(--muted, #9aa3b2); }
+.rp-where dd { margin: 0; overflow-wrap: anywhere; }
+@media (max-width: 520px) { .rp-where dl { grid-template-columns: 1fr; } .rp-where dd { margin-bottom: 6px; } }

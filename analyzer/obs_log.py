@@ -151,6 +151,22 @@ class ObsLog:
     last_ts: Optional[datetime] = None
     browser_errors: int = 0
     plugins: list = field(default_factory=list)
+    scene_blocks: list = field(default_factory=list)   # [(ts, {scene: [(source, kind)]})] from "Loaded scenes:"
+
+    def scenes_at(self, ts=None) -> dict:
+        """{scene: [(source, kind), ...]} for the scene collection loaded at time ts (latest if None)."""
+        best = {}
+        for t, sc in self.scene_blocks:
+            if ts is None or t <= ts:
+                best = sc
+        return best
+
+    def scenes_with(self, source: str, ts=None) -> list:
+        return [sc for sc, items in self.scenes_at(ts).items() if any(n == source for n, _k in items)]
+
+    def sources_of_kind(self, kinds, ts=None) -> list:
+        """[(scene, source, kind)] for sources whose kind is in kinds."""
+        return [(sc, n, k) for sc, items in self.scenes_at(ts).items() for n, k in items if k in kinds]
 
     @property
     def recordings(self):
@@ -165,6 +181,16 @@ class ObsLog:
 
     def to_dict(self):
         return asdict(self)
+
+
+def range_ui(v: str) -> str:
+    """OBS writes “Partial” in its log and config files; every OBS menu calls the same setting “Limited”."""
+    x = (v or "").strip().lower()
+    if x in ("partial", "limited", "tv", "mpeg"):
+        return "Limited"
+    if x in ("full", "pc", "jpeg"):
+        return "Full"
+    return v or ""
 
 
 def _base_date(path: str, lines: list[str]) -> datetime:
@@ -339,6 +365,8 @@ def parse(path: str) -> ObsLog:
                     vs.yuv_mode = v
                     if "/" in v:
                         vs.color_space, vs.color_range = [x.strip() for x in v.split("/", 1)]
+                        vs.color_range = range_ui(vs.color_range)
+                        vs.yuv_mode = f"{vs.color_space}/{vs.color_range}"
             log.video_settings.append(vs)
             i = j
             continue
@@ -372,7 +400,7 @@ def parse(path: str) -> ObsLog:
                 elif k == "color space":
                     dev.color_space = v
                 elif k == "color range":
-                    dev.color_range = v
+                    dev.color_range = range_ui(v)
                 j += 1
             log.devices.append(dev)
             i = j
@@ -472,6 +500,25 @@ def parse(path: str) -> ObsLog:
                         o.pauses[-1][1] = L.ts
                     break
             current_output = None
+        elif t.strip() == "Loaded scenes:":
+            scenes, cur, j = {}, None, i + 1
+            while j < n and lines[j].ts - L.ts < timedelta(seconds=5):
+                tx = lines[j].text
+                m1 = re.match(r"^- scene '(.*)':\s*$", tx)
+                m2 = re.match(r"^\s{2,}- source: '(.*)' \(([^)]*)\)\s*$", tx)
+                if m1:
+                    cur = m1.group(1)
+                    scenes[cur] = []
+                elif m2 and cur is not None and len(tx) - len(tx.lstrip()) <= 4:
+                    scenes[cur].append((m2.group(1), m2.group(2)))
+                elif re.match(r"^\s{4,}- ", tx):
+                    pass                      # filters and nested group items
+                else:
+                    break
+                j += 1
+            log.scene_blocks.append((L.ts, scenes))
+            i = j
+            continue
         elif re.match(r"^(User switched to scene|Switched to scene) '(.*)'", t):
             current_scene = re.match(r"^(?:User switched to scene|Switched to scene) '(.*)'", t).group(1)
             log.scene_switches.append((L.ts, current_scene))

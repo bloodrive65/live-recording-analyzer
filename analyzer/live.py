@@ -658,7 +658,7 @@ def preflight_rules(cfg: obs_config.ObsConfig, log: Optional[obs_log.ObsLog]) ->
                                            f"Or change OBS → Settings → Video → Common FPS Values to {d['fps']:g}."]))
             dr = str(d.get("color_range", "default")).lower()
             if dr in ("full", "partial") and ((dr == "full") != (cfg.color_range.lower() == "full")):
-                A.append(Advice(f"pf-devrange-{d['name']}", "tip", P, f"“{d['name']}” color range is forced to {dr.title()}",
+                A.append(Advice(f"pf-devrange-{d['name']}", "tip", P, f"“{d['name']}” color range is forced to {'Full' if dr == 'full' else 'Limited'}",
                                 f"OBS output is {cfg.range_label}. If this doesn’t match what the source device sends, blacks look grey or crushed.",
                                 steps=[f"Double-click “{d['name']}” → Color Range → Default, unless you have a reason to force it.",
                                        "Or match the source device’s own RGB range setting (for example PS5: Settings → Screen and Video → Video Output → RGB Range)."]))

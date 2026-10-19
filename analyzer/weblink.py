@@ -89,7 +89,8 @@ def to_data(res: Result, version: str = "", compare=None) -> dict:
                   ["Missing frames in file", file_missing if vids else None],
                   ["Timeline incidents", len([i for i in res.incidents if i.kind != "pause"])]],
         "sources": [], "notes": list(res.notes),
-        "findings": [{"s": f.severity, "c": f.category, "t": f.title, "d": f.detail, "w": f.why, "f": f.fix} for f in res.findings],
+        "findings": [{"s": f.severity, "c": f.category, "t": f.title, "d": f.detail, "w": f.why, "f": f.fix,
+                      **({"l": f.loc} if getattr(f, "loc", None) else {})} for f in res.findings],
         "recs": [], "win": [], "sys": [],
     }
     if log:

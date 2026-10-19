@@ -101,6 +101,8 @@
         el("summary", null, el("span", { class: "badge b-" + f.s, text: f.s }), el("span", { class: "t", text: f.t })),
         el("div", { class: "body" },
           f.d ? el("p", { text: f.d }) : null,
+          f.l && f.l.length ? el("div", { class: "rp-where" }, el("div", { class: "h", text: "Where it comes from on your PC" }),
+            el("dl", null, f.l.flatMap(([k, v]) => [el("dt", { text: k }), el("dd", { text: v })]))) : null,
           f.w ? el("p", null, el("b", { text: "Why it matters: " }), f.w) : null,
           f.f ? el("p", null, el("b", { text: "What to try: " }), f.f) : null));
       if (f.s === "critical" || f.s === "warning") det.open = true;

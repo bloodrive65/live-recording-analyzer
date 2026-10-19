@@ -23,6 +23,7 @@ h3{font-size:16px;margin:18px 0 8px}.muted{color:var(--muted)}.small{font-size:1
 .verdict{border-radius:12px;padding:16px 18px;margin:16px 0;border:1px solid var(--line);background:var(--panel)}
 .verdict.crit{border-left:5px solid var(--crit)}.verdict.warn{border-left:5px solid var(--warn)}.verdict.good{border-left:5px solid var(--good)}
 .f{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 16px;margin:10px 0}
+.where{margin:8px 0 10px;padding:8px 10px;border-left:3px solid #5fa8ff;border-radius:6px;background:rgba(95,168,255,.07)}.where .wh{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:#8fc1ff;margin-bottom:4px}.where dl{display:grid;grid-template-columns:max-content 1fr;gap:3px 14px;margin:0}.where dt{color:#9aa3b2}.where dd{margin:0}
 .f summary{cursor:pointer;list-style:none;display:flex;gap:10px;align-items:baseline}.f summary::-webkit-details-marker{display:none}
 .f .t{font-weight:600}.f .rec{margin-left:auto;font-size:12px;color:var(--muted);text-align:right}
 .f .body{margin-top:8px;color:#cfd4dd}.f .body b{color:var(--text)}
@@ -179,6 +180,9 @@ def build(res: Result) -> str:
         body = []
         if f.detail:
             body.append(f"<div>{E(f.detail)}</div>")
+        if getattr(f, "loc", None):
+            body.append("<div class='where'><div class='wh'>Where it comes from on your PC</div><dl>"
+                        + "".join(f"<dt>{E(k)}</dt><dd>{E(v)}</dd>" for k, v in f.loc) + "</dl></div>")
         if f.why:
             body.append(f"<div style='margin-top:6px'><b>Why it matters:</b> {E(f.why)}</div>")
         if f.fix:

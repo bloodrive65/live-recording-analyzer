@@ -28,6 +28,7 @@ class Finding:
     why: str = ""
     fix: str = ""
     recording: str = ""
+    loc: list = field(default_factory=list)    # [[label, value]] — exactly where this comes from, on this PC
 
 
 @dataclass
@@ -302,11 +303,26 @@ def run(log_path: Optional[str], video_paths: dict | None = None, monitor_path: 
                                     "Usually harmless, but repeated crashes can point to a plugin or driver problem.",
                                     "If it keeps happening, check Help → Crash Reports."))
         hdr_displays = [d for d in log.displays if "G2084" in d.get("space", "")]
+        screen_kinds = {"monitor_capture", "window_capture", "game_capture"}
+        t_rec = log.recordings[-1].start if log.recordings else None
+        caps = log.sources_of_kind(screen_kinds, t_rec)
+        rec_scenes = {o.scene for o in log.recordings if getattr(o, "scene", "")}
+        used = [c for c in caps if c[0] in rec_scenes]
+        if hdr_displays and caps and rec_scenes and not used:
+            findings.append(Finding("info", "Color", "Windows HDR is on, but it didn’t affect this recording",
+                                    ", ".join(f"{d.get('name')} ({d.get('size')}, {d.get('refresh')} Hz)" for d in hdr_displays) + " is running in HDR.",
+                                    "HDR only matters for screen, window and game captures. The scene you recorded (" + ", ".join(f"“{x}”" for x in sorted(rec_scenes)) +
+                                    ") has none, so nothing to change for it.",
+                                    "If you record one of the scenes below, tick “Force SDR” on its capture source, or turn Windows HDR off while recording.",
+                                    loc=[["Captures that would be affected", " · ".join(f"Scene “{sc}” → “{n}”" for sc, n, _k in caps[:6])]]))
+            hdr_displays = []
         if hdr_displays:
             findings.append(Finding("info", "Color", "Windows HDR is turned on for a monitor",
                                     ", ".join(f"{d.get('name')} ({d.get('size')}, {d.get('refresh')} Hz)" for d in hdr_displays) + " is running in HDR (PQ/BT.2020).",
                                     "When the OBS canvas is SDR (Rec. 709), any Display/Window/Game Capture of an HDR screen must be tone-mapped. If “Force SDR” is off the result can look washed out or too dark.",
-                                    "For SDR recordings of PC games: tick “Force SDR” on the capture source, or turn Windows HDR off while recording. Game Capture has no Force SDR box — use its Color Space setting instead. Capture-card sources are not affected."))
+                                    "For SDR recordings of PC games: tick “Force SDR” on the capture source, or turn Windows HDR off while recording. Game Capture has no Force SDR box — use its Color Space setting instead. Capture-card sources are not affected.",
+                                    loc=[["Captures in the scene you recorded", " · ".join(f"Scene “{sc}” → “{n}”" for sc, n, _k in used[:6])]] if used else
+                                        ([["Screen captures in your scenes", " · ".join(f"Scene “{sc}” → “{n}”" for sc, n, _k in caps[:6])]] if caps else [])))
         if log.browser_errors >= 20:
             findings.append(Finding("info", "OBS", f"Browser sources logged {log.browser_errors} script errors",
                                     "Widgets (chat, alerts, ads) are throwing JavaScript errors.",
@@ -404,6 +420,35 @@ def _merge_findings(findings, nrecs):
     return out
 
 
+_CFG = None
+
+
+def _cfg():
+    """Current OBS settings on this PC (used only to name the right menus)."""
+    global _CFG
+    if _CFG is None:
+        try:
+            from . import obs_config
+            _CFG = obs_config.load()
+        except Exception:
+            _CFG = False
+    return _CFG or None
+
+
+def _enc_loc(option: str) -> str:
+    c = _cfg()
+    if c is not None and getattr(c, "profile", ""):
+        return c.enc_path(option)
+    return f"OBS → Settings → Output → Recording → {option} (Output Mode: Advanced)"
+
+
+def _src_loc(log, name: str, ts=None, kind_label: str = "") -> str:
+    scenes = log.scenes_with(name, ts) if log else []
+    where = (" and ".join(f"“{x}”" for x in scenes[:4]) + (f" (+{len(scenes) - 4} more)" if len(scenes) > 4 else "")) if scenes else ""
+    src = f"source “{name}”" + (f" ({kind_label})" if kind_label else "")
+    return (f"Scene {where} → {src}" if len(scenes) == 1 else f"Scenes {where} → {src}") if scenes else src[:1].upper() + src[1:]
+
+
 def _recording_findings(log, r: RecordingResult, F: list):
     o = r.output
     lab = r.label
@@ -411,8 +456,10 @@ def _recording_findings(log, r: RecordingResult, F: list):
     enc = o.encoder or {}
     v = r.video
 
-    def add(sev, cat, title, detail, why="", fix=""):
-        F.append(Finding(sev, cat, title, detail, why, fix, lab))
+    def add(sev, cat, title, detail, why="", fix="", loc=None):
+        F.append(Finding(sev, cat, title, detail, why, fix, lab, [list(x) for x in (loc or [])]))
+
+    rec_scene = getattr(o, "scene", "") or ""
 
     # --- skipped / lagged frames
     if o.encode_skipped is not None and o.encode_total:
@@ -423,12 +470,14 @@ def _recording_findings(log, r: RecordingResult, F: list):
             sev = "critical" if pct >= 1 else ("warning" if pct >= 0.05 else "info")
             heavy = []
             preset = str(enc.get("preset", "")).lower()
+            from .obs_config import PRESET_LABELS
+            mp_lbl = {"fullres": "Two Passes (Full Resolution)", "qres": "Two Passes (Quarter Resolution)"}
             if preset in ("p5", "p6", "p7", "slow", "quality", "max quality"):
-                heavy.append(f"preset {enc.get('preset')}")
+                heavy.append(f"Preset {PRESET_LABELS.get(preset, enc.get('preset'))}")
             if str(enc.get("multipass", "")).lower() not in ("", "disabled", "false", "0"):
-                heavy.append(f"multipass {enc.get('multipass')}")
+                heavy.append(f"Multipass Mode {mp_lbl.get(str(enc.get('multipass')).lower(), enc.get('multipass'))}")
             if str(enc.get("lookahead", "")).lower().startswith("true"):
-                heavy.append("look-ahead on")
+                heavy.append("Look-ahead on")
             res = f"{enc.get('width', '')}x{enc.get('height', '')}" if enc.get("width") else (vs.output_res if vs else "")
             fps = vs.fps_value if vs else 0
             why = (f"The encoder ({enc.get('encoder', 'unknown')} {enc.get('codec', '')}, {res} @ {fps:g} fps) could not keep up, so OBS dropped "
@@ -437,14 +486,21 @@ def _recording_findings(log, r: RecordingResult, F: list):
             fix = ("Check the incident timeline below to see what the PC was doing at each skip. "
                    + (f"Your encoder settings include {', '.join(heavy)}, which are demanding at {res}; try a faster preset. " if heavy else "")
                    + "If skips line up with high GPU load, cap the game’s FPS; if they line up with drive stalls, record to an internal SSD.")
+            loc = [["Encoder", f"{enc.get('encoder', 'unknown')} {enc.get('codec', '')} at {res} {fps:g} fps".strip()]]
+            if heavy:
+                loc.append(["Heavy settings", ", ".join(heavy) + " — " + _enc_loc("Preset / Multipass Mode / Look-ahead")])
+            if rec_scene:
+                loc.append(["Scene recorded", f"“{rec_scene}”"])
             add(sev, "Performance", f"{o.encode_skipped:,} frames skipped due to encoding lag ({pct:.2f}%)",
-                f"OBS reported {o.encode_skipped:,} of {o.encode_total:,} frames skipped.", why, fix)
+                f"OBS reported {o.encode_skipped:,} of {o.encode_total:,} frames skipped.", why, fix, loc)
     if o.render_lagged:
         sev = "critical" if (o.render_lagged_pct or 0) >= 1 else "warning"
         add(sev, "Performance", f"{o.render_lagged:,} frames lagged due to rendering ({o.render_lagged_pct}%)",
             "OBS couldn’t finish drawing the scene in time for these frames.",
             "Almost always caused by the GPU being fully used (often by the game), or a very heavy scene (many browser sources, scaling filters).",
-            "Cap the game’s FPS a little below your monitor refresh, run OBS as administrator, and remove unused sources.")
+            "Cap the game’s FPS a little below your monitor refresh, run OBS as administrator, and remove unused sources.",
+            [["Scene recorded", f"“{rec_scene}”" if rec_scene else "unknown"],
+             ["Sources in it", ", ".join(f"“{n}”" for n, _k in (log.scenes_at(o.start).get(rec_scene, []) if log else [])[:8]) or "unknown"]])
     elif o.render_lagged == 0:
         add("good", "Performance", "No frames lagged due to rendering", "OBS rendered every frame on time.")
 
@@ -469,12 +525,15 @@ def _recording_findings(log, r: RecordingResult, F: list):
             add("info", "Video settings", f"OBS scales the picture from {vs.base_res} to {vs.output_res}",
                 f"Downscale filter: {vs.downscale}.",
                 "Scaling costs GPU time each frame (Lanczos is the most expensive filter).",
-                "If you see rendering lag, try Bicubic or set Base and Output resolution to the same value.")
+                "If you see rendering lag, try Bicubic or set Base and Output resolution to the same value.",
+                [["Setting", "OBS → Settings → Video → Base (Canvas) Resolution, Output (Scaled) Resolution, Downscale Filter"],
+                 ["Now", f"{vs.base_res} → {vs.output_res}, {vs.downscale}"]])
         er = (int(enc["width"]), int(enc["height"])) if str(enc.get("width", "")).isdigit() and str(enc.get("height", "")).isdigit() else None
         if er and out and er != out:
             add("info", "Video settings", f"Recording encoder rescales to {er[0]}x{er[1]}",
                 f"Output resolution is {vs.output_res}, but the recording encoder is set to {er[0]}x{er[1]}.",
-                "An extra scaling pass on every frame.", "Disable “Rescale Output” in the recording settings unless you need it.")
+                "An extra scaling pass on every frame.", "Untick “Rescale Output” unless you need a smaller recording than your Output resolution.",
+                [["Setting", _enc_loc("Rescale Output")], ["Now", f"{er[0]}x{er[1]} (Output resolution {vs.output_res})"], ["Change to", "Unticked"]])
         # color
         fmt = (vs.format or "").upper()
         prof = str(enc.get("profile", "")).lower()
@@ -483,25 +542,31 @@ def _recording_findings(log, r: RecordingResult, F: list):
             add("info", "Color", f"8-bit color format ({vs.format}) recorded with a 10-bit profile ({enc.get('profile')})",
                 "OBS produces 8-bit pictures, but the encoder is told to use a 10-bit profile.",
                 "This gives no 10-bit quality benefit — the file just stores 8-bit content in a 10-bit container — and some editors/players handle these files less smoothly.",
-                "For SDR recording use profile “main”. For real 10-bit, set Settings → Advanced → Color Format to P010 (needs a capture source that provides 10-bit/HDR).")
+                "For normal (SDR) recording, set Profile to main. For real 10-bit, set Color Format to P010 instead (your sources must provide 10-bit/HDR).",
+                [["Encoder setting", _enc_loc("Profile")], ["Now", f"Profile {enc.get('profile')}, Color Format {vs.format}"],
+                 ["Color Format is in", "OBS → Settings → Advanced → Video → Color Format"], ["Change to", "Profile: main (keep Color Format NV12)"]])
         if fmt in ("P010", "I010") and "2100" not in (vs.color_space or "") and not tenbit_profile and enc:
             add("warning", "Color", "10-bit color format with an 8-bit encoder profile",
                 f"Color format {vs.format} but encoder profile is {enc.get('profile')}.",
-                "The encoder will throw away the extra precision or fail.", "Use profile main10 (HEVC) or a 10-bit AV1 setting with P010.")
+                "The encoder will throw away the extra precision or fail.", "Use profile main10 (HEVC) or a 10-bit AV1 setting with P010.",
+                [["Encoder setting", _enc_loc("Profile")], ["Color Format is in", "OBS → Settings → Advanced → Video → Color Format"]])
         if "2100" in (vs.color_space or "") and fmt not in ("P010", "I010"):
             add("critical", "Color", "HDR color space with an 8-bit color format",
                 f"Color space {vs.color_space} with format {vs.format}.",
-                "HDR (Rec. 2100) needs a 10-bit format; otherwise colors are wrong.", "Set Color Format to P010, or Color Space back to Rec. 709.")
+                "HDR (Rec. 2100) needs a 10-bit format; otherwise colors are wrong.", "Set Color Format to P010, or Color Space back to Rec. 709.",
+                [["Setting", "OBS → Settings → Advanced → Video → Color Format and Color Space"], ["Now", f"{vs.format}, {vs.color_space}"]])
         if (vs.color_range or "").lower() == "full":
             add("warning", "Color", "Color range is set to Full",
                 f"OBS color settings: {vs.yuv_mode}.",
                 "Most players, editors and YouTube expect Limited range video. Full-range files are often shown with crushed blacks/blown highlights or look washed out, depending on the app.",
-                "OBS → Settings → Advanced → Video → Color Range → Limited (unless you know your whole editing chain handles Full).")
+                "Set it to Limited, unless you know your whole editing chain handles Full.",
+                [["Setting", "OBS → Settings → Advanced → Video → Color Range"], ["Now", "Full"], ["Change to", "Limited"]])
 
     # --- capture devices
     canvas_fps = vs.fps_value if vs else 0
     for d in o.devices:
         dname = f"“{d.name}” ({d.device})" if d.device else f"“{d.name}”"
+        dloc = ["Source", _src_loc(log, d.name, o.start, d.device or "Video Capture Device")]
         if canvas_fps and d.fps:
             ratio = d.fps / canvas_fps
             if abs(d.fps - canvas_fps) < 0.001:
@@ -509,19 +574,25 @@ def _recording_findings(log, r: RecordingResult, F: list):
             elif abs(ratio - round(ratio)) < 0.002 and round(ratio) >= 2:
                 add("info", "Frame rate", f"{dname} runs at {d.fps:g} fps but OBS records at {canvas_fps:g} fps",
                     "OBS keeps every other frame.", "Works fine, but uses extra USB bandwidth and CPU for frames that are thrown away.",
-                    f"Optional: double-click the source → Resolution/FPS Type: Custom → FPS: {canvas_fps:g} (or “Match Output FPS”).")
+                    f"Optional: double-click the source → Resolution/FPS Type: Custom → FPS: {canvas_fps:g} (or “Match Output FPS”).",
+                    [dloc, ["Device sends", f"{d.fps:g} fps"], ["OBS records", f"{canvas_fps:g} fps (OBS → Settings → Video → Common FPS Values)"]])
             else:
                 period = 1 / abs(d.fps - canvas_fps) if abs(d.fps - canvas_fps) > 0 else 0
                 add("warning", "Frame rate", f"Frame-rate mismatch: {dname} {d.fps:g} fps vs OBS {canvas_fps:g} fps",
                     f"The source and OBS run at slightly different rates.",
                     f"OBS has to repeat or drop a frame about every {period:.1f} seconds, which shows up as a regular micro-stutter." if period else "",
-                    "Double-click the source → Resolution/FPS Type: Custom → FPS: match OBS → Settings → Video → Common FPS Values (both 60, or both 59.94).")
+                    f"Make both the same. Easiest: double-click the source → Resolution/FPS Type: Custom → FPS: {canvas_fps:g}. "
+                    f"If the device only offers {d.fps:g}, set OBS → Settings → Video → Common FPS Values to {d.fps:g} instead. "
+                    f"If the device itself is set to {d.fps:g} (for example a console's video output), changing it there also works.",
+                    [dloc, ["Device sends", f"{d.fps:g} fps (source property: FPS)"], ["OBS records", f"{canvas_fps:g} fps (OBS → Settings → Video → Common FPS Values)"],
+                     ["Change to", f"FPS {canvas_fps:g} on the source"]])
         b = _res(vs.base_res) if vs else None
         dr = _res(d.resolution)
         if b and dr and dr != b:
             add("info", "Video settings", f"{dname} is {d.resolution}, canvas is {vs.base_res}",
                 "OBS scales this source to fit the canvas.",
-                "Fine if intended; upscaling adds no detail and costs GPU time.", "Match the device resolution to the canvas when possible.")
+                "Fine if intended; upscaling adds no detail and costs GPU time.", "Match the device resolution to the canvas when possible.",
+                [dloc, ["Device sends", f"{d.resolution} (source property: Resolution)"], ["Canvas", f"{vs.base_res} (OBS → Settings → Video → Base (Canvas) Resolution)"]])
         # Only relevant when this source's audio actually misbehaved (OBS kept adding buffering for it).
         late = (getattr(log, "audio_buffering_sources", []) or []).count(d.name) if log else 0
         if d.sample_rate and log and log.audio_rate and d.sample_rate != log.audio_rate and late >= 2:
@@ -529,11 +600,13 @@ def _recording_findings(log, r: RecordingResult, F: list):
             add("warning", "Audio", f"Audio from {dname} arrived late {late} times and runs at {d.sample_rate} Hz (OBS: {log.audio_rate} Hz)",
                 "OBS kept adding audio buffering for this source.",
                 "OBS converts the rate in real time; on its own that’s harmless, but combined with repeated late audio it can cause drift or sync offsets.",
-                " ".join(audio_rate_fix(d, log.audio_rate)))
+                " ".join(audio_rate_fix(d, log.audio_rate)),
+                [dloc, ["Source audio", f"{d.sample_rate} Hz"], ["OBS audio", f"{log.audio_rate} Hz (OBS → Settings → Audio → Sample Rate)"]])
         if d.format and d.format.upper() in ("MJPEG", "MJPG") and (d.hw_decode or "").lower().startswith("disabled"):
             add("info", "Capture", f"{dname} sends MJPEG with hardware decode off",
                 "The CPU has to decompress every frame.", "Costs CPU and can drop frames at high resolutions.",
-                "Use NV12/YUY2 if the device offers it, or enable hardware decoding.")
+                "Double-click the source → Video Format: NV12 or YUY2 if offered. Otherwise tick “Use hardware decoding when available”.",
+                [dloc, ["Now", f"Video Format {d.format}, hardware decoding off"]])
 
     # --- encoder settings sanity
     if enc:
@@ -541,20 +614,24 @@ def _recording_findings(log, r: RecordingResult, F: list):
         if "nvenc" in e:
             if str(enc.get("lookahead", "")).lower().startswith("true") and vs and vs.fps_value >= 60 and _res(vs.output_res) and _res(vs.output_res)[0] >= 3840:
                 add("warning", "Encoder", "Look-ahead is on for 4K60 NVENC",
-                    "Look-ahead adds significant encoder work.", "At 4K60 this can push NVENC past its limit.", "Turn Look-ahead off.")
+                    "Look-ahead adds significant encoder work.", "At 4K60 this can push NVENC past its limit.", "Turn Look-ahead off.",
+                    [["Setting", _enc_loc("Look-ahead")], ["Now", "On"], ["Change to", "Off"]])
             mp = str(enc.get("multipass", "")).lower()
             if mp in ("fullres", "full resolution", "2"):
                 add("warning", "Encoder", "Two-pass (full resolution) is on",
-                    f"Multipass: {enc.get('multipass')}.", "Doubles the encoder workload at high resolutions.", "Use Quarter Resolution or Disabled.")
+                    f"Multipass: {enc.get('multipass')}.", "Doubles the encoder workload at high resolutions.", "Use Two Passes (Quarter Resolution) or Single Pass.",
+                    [["Setting", _enc_loc("Multipass Mode")], ["Now", "Two Passes (Full Resolution)"], ["Change to", "Two Passes (Quarter Resolution)"]])
         if "x264" in e and vs and _res(vs.output_res) and _res(vs.output_res)[0] >= 2560:
             add("warning", "Encoder", "CPU encoding (x264) at high resolution",
                 f"x264 at {vs.output_res}.", "Software encoding 1440p/4K is extremely CPU heavy and a common cause of encoding lag.",
-                "OBS → Settings → Output → Video Encoder → your graphics card’s hardware encoder (NVIDIA NVENC, AMD AMF/VCE or Intel QuickSync).")
+                "Switch to your graphics card’s hardware encoder (NVIDIA NVENC, AMD AMF or Intel QuickSync).",
+                [["Setting", _enc_loc("Video Encoder")], ["Now", "x264 (CPU)"]])
     path = o.path or ""
     if path.lower().endswith((".mp4", ".mov")) and "hybrid" not in str(o.encoder).lower():
         add("info", "Recording", "Recording directly to MP4/MOV",
             "If OBS, the PC or the drive crashes, an MP4 file can be unreadable.",
-            "MKV (or Hybrid MP4 in OBS 30.2+) survives crashes.", "OBS → Settings → Output → Recording Format → Hybrid MP4 (if listed) or Matroska Video (.mkv).")
+            "MKV (or Hybrid MP4 in OBS 30.2+) survives crashes.", "Choose Hybrid MP4 (if listed) or Matroska Video (.mkv).",
+            [["Setting", _enc_loc("Recording Format")], ["Now", os.path.splitext(path)[1].upper().lstrip(".")]])
 
     # --- drive
     dv = r.drive
@@ -569,7 +646,9 @@ def _recording_findings(log, r: RecordingResult, F: list):
             "Hard disk → Turn off hard disk after → Never, and USB settings → USB selective suspend setting → Disabled.")
     elif (dv.get("media") or "").upper() == "HDD":
         add("info", "Storage", f"Recording drive {dv.get('letter')} is a hard disk ({dv.get('name')})",
-            "Hard disks are fine for typical recording bitrates but slow down when other programs use them at the same time.", "", "")
+            "Hard disks are fine for typical recording bitrates but slow down when other programs use them at the same time.", "",
+            "Avoid using this drive for other things while recording (game installs, downloads, backups, antivirus scans).",
+            [["Recording path", _enc_loc("Recording Path")]])
 
     # --- recording file checks
     if v and v.ok:
@@ -578,53 +657,115 @@ def _recording_findings(log, r: RecordingResult, F: list):
             out = _res(vs.output_res)
             enc_res = (int(enc["width"]), int(enc["height"])) if str(enc.get("width", "")).isdigit() else out
             if enc_res and (vv.get("width"), vv.get("height")) != enc_res:
-                add("info", "File", f"File resolution {vv.get('width')}x{vv.get('height')} differs from OBS output {enc_res[0]}x{enc_res[1]}", "", "", "")
+                add("info", "File", f"File resolution {vv.get('width')}x{vv.get('height')} differs from OBS output {enc_res[0]}x{enc_res[1]}",
+                    "The file isn't the size OBS was set to make.", "Usually means settings changed after this recording, or the file was converted afterwards.",
+                    "If you didn't change anything, check the two settings below.",
+                    [["Output resolution", "OBS → Settings → Video → Output (Scaled) Resolution"], ["Rescale Output", _enc_loc("Rescale Output")]])
             if vs.fps_value and v.nominal_fps and abs(v.nominal_fps - vs.fps_value) > 0.01:
-                add("warning", "File", f"File frame rate {v.nominal_fps:.3f} differs from OBS {vs.fps_value:g}", "", "Players/editors may misjudge timing.", "")
-            fr = {"pc": "Full", "jpeg": "Full", "tv": "Limited", "mpeg": "Limited"}.get(vv.get("color_range", ""), "")
-            if fr and vs.color_range and fr.lower() != vs.color_range.lower():
-                add("warning", "Color", f"File is tagged {fr} range, but OBS is set to {vs.color_range}", "", "Settings may have changed, or the tag is wrong — colors may display incorrectly.", "")
+                add("warning", "File", f"File frame rate {v.nominal_fps:.3f} differs from OBS {vs.fps_value:g}",
+                    "The frame rate stored in the file doesn't match OBS.", "Players/editors may misjudge timing.",
+                    "If you didn't change the frame rate after this recording, set it again and make a short test recording.",
+                    [["Setting", "OBS → Settings → Video → Common FPS Values"], ["OBS", f"{vs.fps_value:g}"], ["File", f"{v.nominal_fps:.3f}"]])
+            fr = obslog.range_ui(vv.get("color_range", ""))
+            orng = obslog.range_ui(vs.color_range)
+            if fr in ("Full", "Limited") and orng in ("Full", "Limited") and fr != orng:
+                now = _cfg()
+                now_rng = obslog.range_ui(getattr(now, "color_range", "")) if now is not None and getattr(now, "profile", "") else ""
+                changed = bool(now_rng) and now_rng != orng
+                add("warning", "Color", f"File is marked {fr} range, but OBS was set to {orng}",
+                    f"OBS recorded with Color Range {orng} (from the OBS log), but the file says {fr}.",
+                    "Players and editors read the file's marking. If it's wrong, blacks look grey or shadows look crushed.",
+                    ("Your Color Range has been changed since this recording, so new recordings will match. Nothing else to do."
+                     if changed else
+                     "OBS normally writes its own setting into the file, so this points to a custom encoder setting or a converted/remuxed file. "
+                     "If you use Recording Type: Custom Output (FFmpeg), remove any color_range option from its muxer/encoder settings. "
+                     "If you converted the file (HandBrake, an editor), check that tool's color range option."),
+                    [["OBS setting", "OBS → Settings → Advanced → Video → Color Range"], ["At recording time", orng],
+                     ["Now", now_rng or "unknown"], ["In the file", fr]])
             cs = vv.get("color_space", "unknown")
             if cs in ("unknown", "", None):
-                add("info", "Color", "Color space is not tagged in the file", "", "Players have to guess between BT.601 and BT.709; colors can shift slightly.", "")
+                add("info", "Color", "Color space is not marked in the file",
+                    "The file doesn't say which color standard (BT.601 or BT.709) it uses.",
+                    "Players have to guess. For HD and 4K they almost always guess BT.709, which matches OBS, so this is usually harmless.",
+                    "Nothing to change in OBS. If colors look slightly off in an editor, set the clip's color space to Rec. 709 there.",
+                    [["OBS setting", f"OBS → Settings → Advanced → Video → Color Space (now {vs.color_space or 'unknown'})"]])
             elif "709" in (vs.color_space or "") and "709" not in cs:
-                add("warning", "Color", f"File color space {cs} doesn’t match OBS setting {vs.color_space}", "", "Colors may shift in players/editors.", "")
+                add("warning", "Color", f"File color space {cs} doesn’t match OBS setting {vs.color_space}",
+                    "The file is marked with a different color standard than OBS used.", "Colors may shift in players/editors.",
+                    "If you didn't change Color Space after this recording, check for a custom encoder setting or a converted file.",
+                    [["OBS setting", "OBS → Settings → Advanced → Video → Color Space"], ["OBS", vs.color_space], ["File", cs]])
         if v.vfr:
             add("warning", "File", "Variable frame timing detected",
                 f"Frame durations vary through the file (measured {v.measured_fps:.3f} fps vs nominal {v.nominal_fps:.3f}).",
                 "Editors such as Premiere and Vegas can drift audio out of sync on variable-frame-rate files.",
                 "Re-encode/convert to constant frame rate before editing, or fix the skips causing it.")
         if v.gaps:
+            obs_skips = (o.encode_skipped or 0) + (o.render_lagged or 0)
+            steps = ["Open the report's timeline: each gap is listed with the time in the video and what the PC was doing at that moment."]
+            loc = [["When", ", ".join(f"{fmt_t(g.t)}" for g in v.gaps[:6]) + (f" (+{len(v.gaps) - 6} more)" if len(v.gaps) > 6 else "") + " into the video"]]
+            if obs_skips:
+                steps.append("OBS also reported skipped/lagged frames, so fix those first (see the encoding/rendering findings).")
+            if o.devices:
+                d = o.devices[0]
+                loc.append(["Likely source", _src_loc(log, d.name, o.start, d.device or "Video Capture Device")])
+                steps.append("If OBS reported no skips at those moments, the frames never arrived from the capture device. Plug it straight into a USB 3 port "
+                             "on the back of the PC (not a hub or front port), and in the source's properties set Buffering to Enable.")
+            if (r.drive.get("bus") or "").upper() == "USB" or (r.drive.get("media") or "").upper() == "HDD":
+                steps.append(f"The recording drive {r.drive.get('letter', '')} is a {'USB' if (r.drive.get('bus') or '').upper() == 'USB' else 'hard'} drive; "
+                             "if the timeline shows it busy or slow at those moments, record to an internal SSD.")
             add("critical" if v.gap_frames_total > 60 else "warning", "File",
                 f"{len(v.gaps)} timestamp gap(s) in the file — {v.gap_frames_total:,} missing frames",
                 "Moments where the next frame comes later than it should; see the timeline for each one.",
-                "These are visible stutters/skips in the video.", "")
+                "These are visible stutters/skips in the video.", " ".join(steps), loc)
         elif v.frame_count:
             add("good", "File", "No missing frames found in the file",
                 f"{v.frame_count:,} frames checked; every timestamp is where it should be.")
         if v.backwards_ts:
-            add("warning", "File", f"{v.backwards_ts} timestamp(s) go backwards", "", "Can cause playback/editing glitches.", "Remux the file in OBS (File → Remux Recordings).")
+            add("warning", "File", f"{v.backwards_ts} timestamp(s) go backwards", "Some frames are stamped earlier than the frame before them.",
+                "Can cause playback/editing glitches.", "Remux the file in OBS: File → Remux Recordings, pick this file, click Remux.")
         if v.audio_gaps:
-            add("warning", "Audio", f"{len(v.audio_gaps)} gap(s) in the audio track", "", "Audible dropouts / pops.", "")
+            asrc = [x for x in dict.fromkeys(getattr(log, "audio_buffering_sources", []) or [])] if log else []
+            loc = [["When", ", ".join(fmt_t(g["t"]) for g in v.audio_gaps[:6]) + " into the video"]]
+            if asrc:
+                loc.append(["Source OBS had trouble with", " · ".join(_src_loc(log, n, o.start) for n in asrc[:3])])
+            add("warning", "Audio", f"{len(v.audio_gaps)} gap(s) in the audio track", "Short stretches where the audio track has no sound data.",
+                "Audible dropouts / pops.",
+                ("OBS had to add audio buffering for the source listed below, so its audio arrived late. Open the source's properties and check its audio settings, "
+                 "and make sure OBS → Settings → Audio → Sample Rate matches the device (48 kHz is standard)."
+                 if asrc else
+                 "Check the timeline at those times for high CPU or drive activity. If nothing stands out, the audio device itself dropped out; reconnect it or update its driver."),
+                loc)
         if abs(v.av_drift_ms) >= 100:
             add("warning", "Audio", f"Audio and video lengths differ by {v.av_drift_ms/1000:.2f} s",
                 f"Audio ends {abs(v.av_drift_ms):.0f} ms {'after' if v.av_drift_ms > 0 else 'before'} the video.",
-                "Points to audio drift or dropped video frames.", "")
+                "Points to audio drift or dropped video frames.",
+                ("Fix the missing video frames first; the audio usually lines up once frames stop being dropped."
+                 if (v.gaps or o.encode_skipped) else
+                 "Check that OBS → Settings → Audio → Sample Rate matches your audio devices (48 kHz is standard). If the drift grows over long recordings, "
+                 "open Edit → Advanced Audio Properties and check the Sync Offset of each source."),
+                [["Audio sources", ", ".join(f"“{x}”" for x in list(dict.fromkeys(getattr(log, "audio_buffering_sources", []) or []))[:3]) or "see OBS → Edit → Advanced Audio Properties"]])
         if v.deep_scanned:
             if v.dup_periodic_s:
                 add("warning", "Frame rate", f"Regular repeated frame every ~{v.dup_periodic_s} s",
                     f"{len(v.dup_isolated)} isolated repeated frames at a steady interval.",
                     "This is the signature of a frame-rate mismatch between source and OBS (e.g. 59.94 vs 60).",
-                    "Set the source and OBS to exactly the same FPS.")
+                    "Set the source and OBS to exactly the same FPS (see the frame-rate finding for the exact source and values).",
+                    [["Repeats every", f"about {v.dup_periodic_s} s"]] + ([["Likely source", _src_loc(log, o.devices[0].name, o.start, o.devices[0].device or "Video Capture Device")]] if o.devices else []))
             if v.dup_isolated and not v.dup_periodic_s:
                 add("info", "File", f"{len(v.dup_isolated)} isolated repeated frames",
-                    "Single frames shown twice during motion — usually what an encoding-lag skip looks like in the finished file.", "", "")
+                    "Single frames shown twice during motion — usually what an encoding-lag skip looks like in the finished file.",
+                    "Usually caused by the same thing as the skipped frames; fix those and these go away.",
+                    "If there are no encoding skips, see the timeline for what the PC was doing at those times.")
             if v.dup_runs:
                 long_runs = [d for d in v.dup_runs if d.frames >= 30]
                 add("info", "File", f"{len(v.dup_runs)} frozen stretches ({len(long_runs)} longer than 0.5 s)",
-                    "Several identical frames in a row. Can be a real freeze, or just a static scene (pause menu, loading screen).", "", "")
+                    "Several identical frames in a row. Can be a real freeze, or just a static scene (pause menu, loading screen).",
+                    "Freezes during gameplay are worth a look; freezes during menus or loading screens are normal.",
+                    "Jump to the times in the timeline. If the game was moving there, the capture source stopped sending frames — check its cable and USB port.")
     if v and not v.ok and v.error:
-        add("info", "File", "Recording file could not be checked", v.error, "", "")
+        add("info", "File", "Recording file could not be checked", v.error,
+            "Without the file, only the OBS log and PC data were analyzed.",
+            "Make sure the recording has finished and the file isn't open in another program, then analyze again. If you moved the file, use Locate file.")
     _ = log
 
 

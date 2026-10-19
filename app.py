@@ -30,7 +30,7 @@ from analyzer import weblink, updater
 
 APP_NAME = "Live Recording Analyzer"
 OLD_NAME = "OBS Session Analyzer"
-VERSION = "1.3.0"
+VERSION = "1.3.1"
 
 
 def resource(name):
