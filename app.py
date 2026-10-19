@@ -30,7 +30,7 @@ from analyzer import weblink, updater
 
 APP_NAME = "Live Recording Analyzer"
 OLD_NAME = "OBS Session Analyzer"
-VERSION = "1.3.1"
+VERSION = "1.3.2"
 
 
 def resource(name):
@@ -766,7 +766,7 @@ class Main(QMainWindow):
         self.refresh_sessions()
         self.refresh_reports()
         self.refresh_latest()
-        tabs.currentChanged.connect(lambda i: self.refresh_latest() if i == 1 and not self.worker else None)
+        tabs.currentChanged.connect(lambda i: self.refresh_latest() if i == 1 else None)
         if self.settings.get("autostart"):
             QTimer.singleShot(800, self.start_monitor)
 
@@ -1186,10 +1186,12 @@ class Main(QMainWindow):
                                    actions=[("Locate file…", "locate_video", None)]))
             vid = None
         mon = self._match_session(o)
+        self._analyzing = (o.start, os.path.basename(vid or o.path or ""))
         self.post_local(Advice("analysis-run", "status", "after", "Analyzing the recording…" + (" (deep scan)" if deep else ""),
                                "This reads the log, the PC data and the file. A deep scan of a long recording can take several minutes.", update=True))
         self._live_job = True
         self._start_worker(log_path, {idx: vid} if vid else {}, mon, deep, [idx])
+        self.refresh_latest()
 
     def _record_history(self, res):
         """Remember each analyzed recording's settings and skip counts, so the next one can be compared."""
@@ -1299,11 +1301,16 @@ class Main(QMainWindow):
         if self.advisor:
             for a in self.advisor.drain():
                 self.post_local(a)
+            if self.advisor.want_analysis:
+                QTimer.singleShot(2500, self.refresh_latest)      # the recording just stopped: update the Analyzer card
             if self.advisor.want_analysis and self.cb_autoanalyze.isChecked():
                 log_path, rec = self.advisor.want_analysis
                 self.advisor.want_analysis = None
                 self.last_video = rec
                 QTimer.singleShot(4000, lambda lp=log_path, r=rec: self.analyze_last(log_path=lp or None, video=r or None))
+        # keep "Your latest recording" current while the Analyzer tab is on screen
+        if self.isVisible() and self.tabs.currentIndex() == 1 and now - getattr(self, "_latest_t", 0) >= 10:
+            self.refresh_latest()
         m = self.monitor
         if not m or not self.isVisible():      # nothing to draw while minimized to the tray
             return
@@ -1700,9 +1707,16 @@ class Main(QMainWindow):
     # ---- latest recording helpers
     def _latest_recording(self):
         """Newest recording across the newest OBS logs: (log_path, parsed_log, index) or (None, None, None)."""
+        cache = getattr(self, "_log_cache", None)
+        if cache is None:
+            cache = self._log_cache = {}
         for p in obs_log.latest_logs(4):
             try:
-                lg = obs_log.parse(p)
+                st = os.stat(p)
+                key = (st.st_mtime, st.st_size)
+                if cache.get(p, (None,))[0] != key:          # only re-read a log when OBS has written to it
+                    cache[p] = (key, obs_log.parse(p))
+                lg = cache[p][1]
             except Exception:
                 continue
             if lg.recordings:
@@ -1737,6 +1751,7 @@ class Main(QMainWindow):
     def refresh_latest(self):
         if not hasattr(self, "latest_lbl"):
             return
+        self._latest_t = time.time()
         log_path, lg, idx = self._latest_recording()
         if not lg:
             self.latest_lbl.setText("No recordings found in the recent OBS logs yet.")
@@ -1771,6 +1786,9 @@ class Main(QMainWindow):
                          "click “Start watching” on the Live tab before your next recording to also see what the PC was doing.")
         if not o.stop:
             notes.append("Stop the recording in OBS first for a complete result.")
+        an = getattr(self, "_analyzing", None)
+        if self.worker and an and an[0] == o.start:
+            notes.insert(0, "Analyzing this recording now; the progress is shown below.")
         self.latest_note.setText(" ".join(notes))
 
     # ---- last report card
@@ -2108,6 +2126,7 @@ class Main(QMainWindow):
 
     def _done(self, res, path):
         self._finish()
+        self._analyzing = None
         cmp_, prev = None, None
         if res.recordings:
             cur, prev = self._record_history(res)
