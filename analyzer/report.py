@@ -11,8 +11,8 @@ from .analyze import Result, fmt_t, SEV_ORDER
 E = html.escape
 
 CSS = """
-:root{--bg:#0f1115;--panel:#171a21;--panel2:#1d212a;--line:#2a2f3a;--text:#e7e9ee;--muted:#9aa3b2;
---crit:#ff5d5d;--warn:#f5b748;--info:#5fa8ff;--good:#3ecf8e;--accent:#c23b3b}
+:root{--bg:#141416;--panel:#1c1c20;--panel2:#222228;--line:#2c2c33;--text:#e7e9ee;--muted:#9a9ca5;
+--crit:#ff5d5d;--warn:#f5b748;--info:#5fa8ff;--good:#3ecf8e;--accent:#e7e9ee}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px/1.5 "Segoe UI",system-ui,-apple-system,sans-serif}
 .wrap{max-width:1180px;margin:0 auto;padding:28px 22px 60px}
 h1{font-size:26px;margin:0 0 4px}h2{font-size:19px;margin:34px 0 12px;padding-bottom:6px;border-bottom:1px solid var(--line)}
@@ -23,7 +23,7 @@ h3{font-size:16px;margin:18px 0 8px}.muted{color:var(--muted)}.small{font-size:1
 .verdict{border-radius:12px;padding:16px 18px;margin:16px 0;border:1px solid var(--line);background:var(--panel)}
 .verdict.crit{border-left:5px solid var(--crit)}.verdict.warn{border-left:5px solid var(--warn)}.verdict.good{border-left:5px solid var(--good)}
 .f{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 16px;margin:10px 0}
-.where{margin:8px 0 10px;padding:8px 10px;border-left:3px solid #5fa8ff;border-radius:6px;background:rgba(95,168,255,.07)}.where .wh{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:#8fc1ff;margin-bottom:4px}.where dl{display:grid;grid-template-columns:max-content 1fr;gap:3px 14px;margin:0}.where dt{color:#9aa3b2}.where dd{margin:0}
+.where{margin:8px 0 10px;padding:8px 10px;border-left:3px solid #5fa8ff;border-radius:6px;background:rgba(95,168,255,.07)}.where .wh{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:#8fc1ff;margin-bottom:4px}.where dl{display:grid;grid-template-columns:max-content 1fr;gap:3px 14px;margin:0}.where dt{color:#9a9ca5}.where dd{margin:0}
 .f summary{cursor:pointer;list-style:none;display:flex;gap:10px;align-items:baseline}.f summary::-webkit-details-marker{display:none}
 .f .t{font-weight:600}.f .rec{margin-left:auto;font-size:12px;color:var(--muted);text-align:right}
 .f .body{margin-top:8px;color:#cfd4dd}.f .body b{color:var(--text)}
@@ -69,18 +69,18 @@ def _svg_chart(rec, letter, incidents, width=1120, height=230):
 
     parts = [f'<svg viewBox="0 0 {width} {height}" width="100%" role="img" aria-label="System load over time">']
     for g in (0, 25, 50, 75, 100):
-        parts.append(f'<line x1="{pad_l}" x2="{width-pad_r}" y1="{y(g):.1f}" y2="{y(g):.1f}" stroke="#2a2f3a" stroke-width="1"/>')
-        parts.append(f'<text x="{pad_l-6}" y="{y(g)+4:.1f}" fill="#9aa3b2" font-size="11" text-anchor="end">{g}</text>')
+        parts.append(f'<line x1="{pad_l}" x2="{width-pad_r}" y1="{y(g):.1f}" y2="{y(g):.1f}" stroke="#2c2c33" stroke-width="1"/>')
+        parts.append(f'<text x="{pad_l-6}" y="{y(g)+4:.1f}" fill="#9a9ca5" font-size="11" text-anchor="end">{g}</text>')
     # time ticks
     tf = "%I:%M:%S %p" if span < 900 else "%I:%M %p"
     for k in range(7):
         dt = t0 + (t1 - t0) * (k / 6)
         anchor = "start" if k == 0 else ("end" if k == 6 else "middle")
-        parts.append(f'<text x="{x(dt):.1f}" y="{height-6}" fill="#9aa3b2" font-size="11" text-anchor="{anchor}">{dt.strftime(tf)}</text>')
+        parts.append(f'<text x="{x(dt):.1f}" y="{height-6}" fill="#9a9ca5" font-size="11" text-anchor="{anchor}">{dt.strftime(tf)}</text>')
     # incident markers
     for inc in incidents:
         if inc.kind in ("render", "encode", "file-gap", "repeat", "freeze", "winevent", "audio-gap") and t0 <= inc.start <= t1:
-            col = {"render": "#ff5d5d", "encode": "#ff5d5d", "file-gap": "#ff9b5d", "repeat": "#ff9b5d", "winevent": "#c58bff"}.get(inc.kind, "#9aa3b2")
+            col = {"render": "#ff5d5d", "encode": "#ff5d5d", "file-gap": "#ff9b5d", "repeat": "#ff9b5d", "winevent": "#c58bff"}.get(inc.kind, "#9a9ca5")
             xx = x(inc.start)
             parts.append(f'<line x1="{xx:.1f}" x2="{xx:.1f}" y1="{pad_t}" y2="{pad_t+h}" stroke="{col}" stroke-opacity=".55" stroke-width="1.5"><title>{E(inc.start.strftime("%I:%M:%S %p"))} {E(inc.title)}</title></line>')
         elif inc.kind == "pause" and t0 <= inc.start <= t1:

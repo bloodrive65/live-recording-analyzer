@@ -13,7 +13,7 @@
 </head><body>
 <a class="skip" href="#main">Skip to content</a>
 <header class="top"><div class="wrap">
-<a class="brand" href="index.html"><img src="assets/logo.svg" alt="" width="32" height="32">Live Recording Analyzer</a>
+<a class="brand" href="index.html"><img src="assets/favicon-32.png" srcset="assets/favicon-32.png 1x, assets/logo-64.png 2x, assets/logo-512.png 4x" alt="" width="32" height="32">Live Recording Analyzer</a>
 <button class="menu-btn" aria-label="Menu" aria-expanded="false" aria-controls="nav">&#9776;</button>
 <nav class="nav" id="nav" aria-label="Main"><a href="index.html">Home</a><a href="getting-started.html">Getting started</a><a href="using-the-app.html">Using the app</a><a href="problems-explained.html">Problems explained</a><a href="faq.html" aria-current=page>FAQ & fixes</a><a href="releases.html">Releases</a></nav>
 </div></header>
@@ -26,7 +26,7 @@
 <h2 id="light">Will it slow down my game or OBS?</h2>
 <p>It's designed not to. While watching, it:</p>
 <ul>
-<li>runs at <b>below-normal priority</b>, so games and OBS always come first</li>
+<li>runs its background work (PC checks and analysis) at <b>below-normal priority</b>, so games and OBS always come first, while the window stays responsive</li>
 <li>reads counters Windows already keeps, about once a second. It doesn't capture the screen or hook into games or OBS.</li>
 <li>only looks at the busiest programs once every few seconds</li>
 <li>typically uses under 1% CPU and around 100–150 MB of memory (most of that is the window itself)</li>

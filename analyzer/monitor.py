@@ -250,6 +250,13 @@ class Monitor:
 
     # ------------------------------------------------------------------ sampling
     def _loop(self):
+        if sys.platform == "win32":     # stay out of the game's and OBS's way (only this thread, not the window)
+            try:
+                import ctypes
+                k = ctypes.windll.kernel32
+                k.SetThreadPriority(k.GetCurrentThread(), -1)   # THREAD_PRIORITY_BELOW_NORMAL
+            except Exception:
+                pass
         next_t = time.time()
         while not self.stop_evt.is_set():
             try:

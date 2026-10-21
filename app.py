@@ -11,7 +11,7 @@ import traceback
 import webbrowser
 from datetime import datetime, timedelta
 
-from PySide6.QtCore import Qt, QTimer, QThread, Signal, QUrl, QSize
+from PySide6.QtCore import Qt, QTimer, QThread, Signal, QUrl, QSize, QObject
 from PySide6.QtGui import QIcon, QAction, QDesktopServices, QFont, QColor, QPalette
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QPushButton,
@@ -30,7 +30,7 @@ from analyzer import weblink, updater
 
 APP_NAME = "Live Recording Analyzer"
 OLD_NAME = "OBS Session Analyzer"
-VERSION = "1.3.2"
+VERSION = "1.4.0"
 
 
 def resource(name):
@@ -87,64 +87,80 @@ def save_settings(s):
 
 
 STYLE = """
-* { font-family: 'Segoe UI', sans-serif; font-size: 10pt; }
-QMainWindow, QWidget { background: #0f1115; color: #e7e9ee; }
 QTabWidget::pane { border: none; }
-QTabBar::tab { background: transparent; color: #9aa3b2; padding: 10px 18px; margin-right: 4px; border-bottom: 2px solid transparent; font-weight: 600; }
-QTabBar::tab:selected { color: #ffffff; border-bottom: 2px solid #d64545; }
+QTabBar::tab { background: transparent; color: #9a9ca5; padding: 10px 18px; margin-right: 4px; border-bottom: 2px solid transparent; font-weight: 600; }
+QTabBar::tab:selected { color: #ffffff; border-bottom: 2px solid #e7e9ee; }
 QTabBar::tab:hover { color: #ffffff; }
-QFrame#card { background: #171a21; border: 1px solid #2a2f3a; border-radius: 10px; }
+QFrame#card { background: #1c1c20; border: 1px solid #2c2c33; border-radius: 10px; }
 QLabel#h1 { font-size: 17pt; font-weight: 700; }
 QLabel#h2 { font-size: 12pt; font-weight: 650; }
-QLabel#muted { color: #9aa3b2; }
-QLabel#tileK { color: #9aa3b2; font-size: 8.5pt; font-weight: 600; }
+QLabel#muted { color: #9a9ca5; }
+QLabel#tileK { color: #9a9ca5; font-size: 8.5pt; font-weight: 600; }
 QLabel#tileV { font-size: 17pt; font-weight: 650; }
-QPushButton { background: #232834; border: 1px solid #343b49; border-radius: 7px; padding: 7px 14px; color: #e7e9ee; }
-QPushButton:hover { background: #2b3140; }
-QPushButton:disabled { color: #6b7280; background: #1a1d24; }
-QPushButton#primary { background: #c23b3b; border: 1px solid #d64545; font-weight: 700; font-size: 11pt; padding: 10px 22px; }
-QPushButton#primary:hover { background: #d64545; }
-QPushButton#stop { background: #3a3f4b; border: 1px solid #555c6b; font-weight: 700; font-size: 11pt; padding: 10px 22px; }
-QLineEdit, QComboBox, QSpinBox { background: #1d212a; border: 1px solid #343b49; border-radius: 6px; padding: 5px 8px; color: #e7e9ee; }
+QPushButton { background: #26262c; border: 1px solid #3a3a43; border-radius: 7px; padding: 7px 14px; color: #e7e9ee; }
+QPushButton:hover { background: #303037; }
+QPushButton:disabled { color: #6b6d75; background: #1c1c20; }
+QPushButton#primary { background: #e7e9ee; border: 1px solid #ffffff; color: #16171a; font-weight: 700; font-size: 11pt; padding: 10px 22px; }
+QPushButton#primary:hover { background: #ffffff; }
+QPushButton#primary:disabled { background: #3a3a43; border: 1px solid #44444d; color: #8a8c94; }
+QPushButton#stop { background: #3a3a43; border: 1px solid #55555f; font-weight: 700; font-size: 11pt; padding: 10px 22px; }
+QLineEdit, QComboBox, QSpinBox { background: #222228; border: 1px solid #3a3a43; border-radius: 6px; padding: 5px 8px; color: #e7e9ee; }
 QSpinBox { padding-right: 26px; min-height: 22px; }
-QSpinBox::up-button { subcontrol-origin: border; subcontrol-position: top right; width: 22px; background: #2e3545;
-    border-left: 1px solid #4a5263; border-bottom: 1px solid #4a5263; border-top-right-radius: 6px; }
-QSpinBox::down-button { subcontrol-origin: border; subcontrol-position: bottom right; width: 22px; background: #2e3545;
-    border-left: 1px solid #4a5263; border-bottom-right-radius: 6px; }
-QSpinBox::up-button:hover, QSpinBox::down-button:hover { background: #3d4659; }
-QSpinBox::up-button:pressed, QSpinBox::down-button:pressed { background: #c23b3b; }
+QSpinBox::up-button { subcontrol-origin: border; subcontrol-position: top right; width: 22px; background: #2e2e35;
+    border-left: 1px solid #4a4a54; border-bottom: 1px solid #4a4a54; border-top-right-radius: 6px; }
+QSpinBox::down-button { subcontrol-origin: border; subcontrol-position: bottom right; width: 22px; background: #2e2e35;
+    border-left: 1px solid #4a4a54; border-bottom-right-radius: 6px; }
+QSpinBox::up-button:hover, QSpinBox::down-button:hover { background: #3c3c45; }
+QSpinBox::up-button:pressed, QSpinBox::down-button:pressed { background: #5a5a64; }
 QSpinBox::up-arrow { image: url(UP_SVG); width: 10px; height: 10px; }
 QSpinBox::down-arrow { image: url(DOWN_SVG); width: 10px; height: 10px; }
 QLabel#pill { border-radius: 10px; padding: 3px 10px; font-weight: 600; font-size: 9pt; }
 QLabel#chip { border-radius: 9px; padding: 2px 9px; font-weight: 700; font-size: 8.5pt; }
-QComboBox QAbstractItemView { background: #1d212a; color: #e7e9ee; selection-background-color: #c23b3b; }
-QTreeWidget, QListWidget, QTextBrowser { background: #171a21; border: 1px solid #2a2f3a; border-radius: 8px; color: #e7e9ee; }
-QHeaderView::section { background: #1d212a; color: #9aa3b2; border: none; padding: 6px; font-weight: 600; }
+QComboBox QAbstractItemView { background: #222228; color: #e7e9ee; selection-background-color: #3c3c45; }
+QTreeWidget, QListWidget, QTextBrowser { background: #1c1c20; border: 1px solid #2c2c33; border-radius: 8px; color: #e7e9ee; }
+QHeaderView::section { background: #222228; color: #9a9ca5; border: none; padding: 6px; font-weight: 600; }
 QTreeWidget::item, QListWidget::item { padding: 4px; }
-QTreeWidget::item:selected, QListWidget::item:selected { background: #3a2226; }
-QProgressBar { background: #1d212a; border: 1px solid #343b49; border-radius: 6px; text-align: center; color: #e7e9ee; height: 18px; }
-QProgressBar::chunk { background: #c23b3b; border-radius: 5px; }
-QLabel, QCheckBox { background: transparent; }
+QTreeWidget::item:selected, QListWidget::item:selected { background: #34343c; color: #ffffff; }
+QProgressBar { background: #222228; border: 1px solid #3a3a43; border-radius: 6px; text-align: center; color: #e7e9ee; height: 18px; }
+QProgressBar::chunk { background: #d4d6dc; border-radius: 5px; }
 QCheckBox { spacing: 8px; }
-QCheckBox::indicator { width: 16px; height: 16px; border: 1px solid #555c6b; border-radius: 4px; background: #1d212a; }
-QCheckBox::indicator:checked { background: #c23b3b; border: 1px solid #d64545; image: url(CHECK_SVG); }
-QCheckBox::indicator:hover { border: 1px solid #8a93a5; }
+QCheckBox::indicator { width: 16px; height: 16px; border: 1px solid #55555f; border-radius: 4px; background: #222228; }
+QCheckBox::indicator:checked { background: #e7e9ee; border: 1px solid #ffffff; image: url(CHECK_SVG); }
+QCheckBox::indicator:hover { border: 1px solid #8a8c94; }
 QScrollBar:vertical { background: transparent; width: 10px; margin: 0; }
-QScrollBar::handle:vertical { background: #343b49; border-radius: 5px; min-height: 30px; }
-QScrollBar::handle:vertical:hover { background: #4a5263; }
+QScrollBar::handle:vertical { background: #3a3a43; border-radius: 5px; min-height: 30px; }
+QScrollBar::handle:vertical:hover { background: #4a4a54; }
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
 QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: transparent; }
 QScrollArea#feed { border: none; background: transparent; }
 QWidget#feedInner { background: transparent; }
 QLabel#advT { font-size: 11pt; font-weight: 650; }
-QLabel#steps { color: #cfd5df; background: #12151b; border-radius: 6px; padding: 8px 10px; }
-QPushButton#link { background: transparent; border: none; color: #8fb8ff; padding: 2px 4px; }
-QPushButton#link:hover { color: #c4d9ff; text-decoration: underline; }
-QPushButton#act { background: #2a2030; border: 1px solid #5a3a46; padding: 5px 12px; }
-QPushButton#act:hover { background: #3a2a3e; }
-QStatusBar { color: #9aa3b2; }
-QStatusBar QLabel { color: #9aa3b2; padding: 0 8px; }
+QLabel#steps { color: #d2d4da; background: #161619; border-radius: 6px; padding: 8px 10px; }
+QPushButton#link { background: transparent; border: none; color: #c9ced8; padding: 2px 4px; text-decoration: underline; }
+QPushButton#link:hover { color: #ffffff; }
+QPushButton#act { background: #26262c; border: 1px solid #4a4a54; padding: 5px 12px; }
+QPushButton#act:hover { background: #303037; }
+QStatusBar { color: #9a9ca5; }
+QStatusBar QLabel { color: #9a9ca5; padding: 0 8px; }
 """
+
+
+def apply_theme(app):
+    """Base colors come from the palette (cheap to paint); the style sheet only styles specific controls."""
+    app.setStyle("Fusion")
+    app.setFont(QFont("Segoe UI", 10))
+    pal = QPalette()
+    for role, col in ((QPalette.Window, "#141416"), (QPalette.WindowText, "#e7e9ee"), (QPalette.Base, "#1c1c20"),
+                      (QPalette.AlternateBase, "#222228"), (QPalette.Text, "#e7e9ee"), (QPalette.Button, "#26262c"),
+                      (QPalette.ButtonText, "#e7e9ee"), (QPalette.Highlight, "#3c3c45"), (QPalette.HighlightedText, "#ffffff"),
+                      (QPalette.ToolTipBase, "#26262c"), (QPalette.ToolTipText, "#e7e9ee"), (QPalette.Link, "#c9ced8"),
+                      (QPalette.PlaceholderText, "#6b6d75")):
+        pal.setColor(role, QColor(col))
+    pal.setColor(QPalette.Disabled, QPalette.WindowText, QColor("#6b6d75"))
+    pal.setColor(QPalette.Disabled, QPalette.Text, QColor("#6b6d75"))
+    pal.setColor(QPalette.Disabled, QPalette.ButtonText, QColor("#6b6d75"))
+    app.setPalette(pal)
+    app.setStyleSheet(app_style())
 
 
 def _default_browser_cmd():
@@ -197,13 +213,147 @@ def app_style():
     return STYLE.replace("CHECK_SVG", f("check.svg")).replace("UP_SVG", f("up.svg")).replace("DOWN_SVG", f("down.svg"))
 
 
-PILL = {"ok": ("#12321f", "#3ecf8e"), "warn": ("#3a2f12", "#f5b748"), "bad": ("#3a1717", "#ff6b6b"), "idle": ("#23272f", "#9aa3b2")}
+PILL = {"ok": ("#12321f", "#3ecf8e"), "warn": ("#3a2f12", "#f5b748"), "bad": ("#3a1717", "#ff6b6b"), "idle": ("#26262c", "#9a9ca5")}
 
 
 def set_pill(lbl, kind, text):
     bg, fg = PILL.get(kind, PILL["idle"])
     lbl.setText(text)
     lbl.setStyleSheet(f"background:{bg}; color:{fg};")
+
+
+def fmt_dur(sec):
+    """Friendly length of time: "under a minute", "about 4 min", "about 1 h 10 min"."""
+    sec = max(0, int(round(sec or 0)))
+    if sec < 60:
+        return "under a minute"
+    m = int(round(sec / 60.0))
+    if m < 60:
+        return f"about {m} min"
+    return f"about {m // 60} h {m % 60} min" if m % 60 else f"about {m // 60} h"
+
+
+class _Bridge(QObject):
+    """Hands results from background threads to the window thread."""
+    latest = Signal(object)
+
+
+class WaveBar(QWidget):
+    """Progress bar with slow, fluid waves inside the filled part. It only animates while visible and running."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedHeight(16)
+        self._target = 0.0
+        self._shown = 0.0
+        self._phase = 0.0
+        self._t = time.monotonic()
+        self._timer = QTimer(self)
+        self._timer.setTimerType(Qt.PreciseTimer)
+        self._timer.timeout.connect(self._step)
+
+    # QProgressBar-compatible bits used by the app (range 0..1000)
+    def setValue(self, v):
+        self._target = max(0.0, min(1.0, v / 1000.0))
+        if self._target < self._shown:
+            self._shown = self._target
+        self._kick()
+
+    def setRange(self, *_):
+        pass
+
+    def setTextVisible(self, *_):
+        pass
+
+    def _kick(self):
+        if self.isVisible() and not self._timer.isActive():
+            self._t = time.monotonic()
+            self._timer.start(16)
+
+    def showEvent(self, e):
+        super().showEvent(e)
+        self._kick()
+
+    def hideEvent(self, e):
+        super().hideEvent(e)
+        self._timer.stop()
+
+    def _step(self):
+        now = time.monotonic()
+        dt = min(0.1, now - self._t)
+        self._t = now
+        self._phase += dt * 0.9                                    # slow drift
+        self._shown += (self._target - self._shown) * min(1.0, dt * 2.2)   # ease toward the real value
+        self.update()
+
+    def paintEvent(self, e):
+        import math
+        from PySide6.QtGui import QPainter, QPainterPath, QLinearGradient
+        from PySide6.QtCore import QRectF, QPointF
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        r = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
+        rad = r.height() / 2
+        track = QPainterPath()
+        track.addRoundedRect(r, rad, rad)
+        p.fillPath(track, QColor("#222228"))
+        p.setPen(QColor("#33333b"))
+        p.drawPath(track)
+        fw = r.width() * self._shown
+        if fw > 1:
+            p.setClipPath(track)
+            fill = QRectF(r.left(), r.top(), fw, r.height())
+            g = QLinearGradient(fill.topLeft(), fill.topRight())
+            g.setColorAt(0, QColor(78, 80, 88))
+            g.setColorAt(1, QColor(122, 125, 134))
+            p.fillRect(fill, g)
+            h = r.height()
+            for amp, length, speed, alpha, base in ((0.22, 120.0, 1.0, 90, 0.40), (0.18, 190.0, -0.6, 70, 0.55), (0.14, 80.0, 1.4, 60, 0.28)):
+                path = QPainterPath(QPointF(r.left(), r.bottom()))
+                x = r.left()
+                while x <= r.left() + fw + 4:
+                    y = r.top() + h * (base + amp * math.sin((x / length) * 2 * math.pi + self._phase * speed * 2.0))
+                    path.lineTo(QPointF(x, y))
+                    x += 3
+                path.lineTo(QPointF(r.left() + fw + 4, r.bottom()))
+                path.closeSubpath()
+                p.fillPath(path, QColor(255, 255, 255, alpha))
+            edge = QLinearGradient(QPointF(r.left() + fw - 24, 0), QPointF(r.left() + fw, 0))
+            edge.setColorAt(0, QColor(255, 255, 255, 0))
+            edge.setColorAt(1, QColor(255, 255, 255, 150))
+            p.fillRect(QRectF(r.left() + max(0, fw - 24), r.top(), min(24, fw), r.height()), edge)
+        p.end()
+
+
+class PerfWatch(QObject):
+    """Notes moments when the window couldn't respond for a while (over 100 ms) in perf.log,
+    so slowness on a specific PC can be measured instead of guessed."""
+
+    def __init__(self, parent, path):
+        super().__init__(parent)
+        self.path = path
+        self.where = lambda: ""
+        self._last = time.monotonic()
+        self._t = QTimer(self)
+        self._t.setTimerType(Qt.PreciseTimer)
+        self._t.timeout.connect(self._check)
+        self._t.start(250)
+
+    def _check(self):
+        now = time.monotonic()
+        lag = (now - self._last - 0.25) * 1000
+        self._last = now
+        if lag > 100:
+            self.note(f"window busy for {lag:.0f} ms", )
+
+    def note(self, text):
+        try:
+            if os.path.exists(self.path) and os.path.getsize(self.path) > 262144:
+                os.replace(self.path, self.path + ".old")
+            with open(self.path, "a", encoding="utf-8") as f:
+                f.write(f"{datetime.now():%Y-%m-%d %H:%M:%S}  {text}  [{self.where()}]\n")
+        except Exception:
+            pass
 
 
 def card():
@@ -242,7 +392,7 @@ class Tile(QFrame):
 
 
 SEV = {"critical": ("#ff5d5d", "CRITICAL"), "warning": ("#f5b748", "WARNING"), "tip": ("#5fa8ff", "TIP"),
-       "good": ("#3ecf8e", "GOOD"), "status": ("#9aa3b2", "STATUS"), "request": ("#c08cff", "NEEDS YOU")}
+       "good": ("#3ecf8e", "GOOD"), "status": ("#9a9ca5", "STATUS"), "request": ("#c08cff", "NEEDS YOU")}
 PHASE = {"before": "Before recording", "during": "During recording", "after": "After recording"}
 
 
@@ -291,8 +441,8 @@ class AdviceCard(QFrame):
 
     def refresh(self, a):
         self.advice = a
-        col, name = SEV.get(a.severity, ("#9aa3b2", a.severity.upper()))
-        self.setStyleSheet(f"QFrame#adv {{ background:#171a21; border:1px solid #2a2f3a; border-left:4px solid {col}; border-radius:8px; }}")
+        col, name = SEV.get(a.severity, ("#9a9ca5", a.severity.upper()))
+        self.setStyleSheet(f"QFrame#adv {{ background:#1c1c20; border:1px solid #2c2c33; border-left:4px solid {col}; border-radius:8px; }}")
         self.badge.setText(name)
         self.badge.setStyleSheet(f"color:{col}; font-weight:700; font-size:8.5pt;")
         meta = [a.ts.strftime("%H:%M:%S"), PHASE.get(a.phase, a.phase)]
@@ -326,6 +476,7 @@ class AdviceCard(QFrame):
 
 # ------------------------------------------------------------------------------ workers
 class AnalyzeWorker(QThread):
+    """Relays a separate analysis process (analyzer/proc.py) to the window."""
     progress = Signal(str, float)
     done = Signal(object, str)
     failed = Signal(str)
@@ -333,22 +484,33 @@ class AnalyzeWorker(QThread):
     def __init__(self, log_path, videos, monitor_path, deep, rec_filter):
         super().__init__()
         self.args = (log_path, videos, monitor_path, deep, rec_filter)
+        self.job = None
         self._cancel = False
 
     def cancel(self):
         self._cancel = True
+        if self.job:
+            self.job.cancel()
 
     def run(self):
-        log_path, videos, monitor_path, deep, rec_filter = self.args
+        from analyzer import proc
         try:
-            res = analyze.run(log_path, video_paths=videos, monitor_path=monitor_path, deep=deep,
-                              progress=lambda m, p: self.progress.emit(m, p), cancel=lambda: self._cancel,
-                              recordings_filter=rec_filter)
+            self.job = proc.Job(self.args, REPORTS)
+            self.job.start()
             if self._cancel:
-                self.failed.emit("Cancelled.")
-                return
-            path = report.save(res, REPORTS)
-            self.done.emit(res, path)
+                self.job.cancel()
+            while True:
+                m = self.job.get(0.5)
+                if m is None:
+                    continue
+                if m[0] == "progress":
+                    self.progress.emit(m[1], m[2])
+                elif m[0] == "done":
+                    self.done.emit(m[1], m[2])
+                    break
+                else:
+                    self.failed.emit(m[1])
+                    break
         except Exception:
             self.failed.emit(traceback.format_exc())
 
@@ -742,6 +904,9 @@ class Main(QMainWindow):
         self.tabs = tabs
         self.advisor = None
         self._ui_q = queue.Queue()
+        self._bridge = _Bridge(self)
+        self._bridge.latest.connect(self._show_latest)
+        self._latest_lock = threading.Lock()
         self._live_job = False
         self.last_video = None
         settings_tab = self._settings_tab()     # build first: other tabs read its widgets
@@ -767,6 +932,8 @@ class Main(QMainWindow):
         self.refresh_reports()
         self.refresh_latest()
         tabs.currentChanged.connect(lambda i: self.refresh_latest() if i == 1 else None)
+        self.perf = PerfWatch(self, os.path.join(DATA, "perf.log"))
+        self.perf.where = lambda: f"{VERSION}, tab {self.tabs.currentIndex()}, {'analyzing' if self.worker else 'idle'}, {'watching' if self.monitor else 'not watching'}"
         if self.settings.get("autostart"):
             QTimer.singleShot(800, self.start_monitor)
 
@@ -782,7 +949,7 @@ class Main(QMainWindow):
         tl.setContentsMargins(20, 14, 20, 14)
         self.phase_dot = QLabel()
         self.phase_dot.setFixedSize(14, 14)
-        self._set_dot("#6b7280")
+        self._set_dot("#6b6d75")
         tl.addWidget(self.phase_dot, 0, Qt.AlignVCenter)
         tl.addSpacing(6)
         col = QVBoxLayout()
@@ -884,7 +1051,7 @@ class Main(QMainWindow):
             self.cards[a.key] = c
             self.feed_lay.insertWidget(0, c)
         c.setVisible(self._passes(a))
-        while len(self.cards) > 150:   # keep the feed light during long sessions
+        while len(self.cards) > 60:   # keep the feed light during long sessions
             oldest = self.feed_lay.itemAt(self.feed_lay.count() - 2).widget()
             self._dismiss(oldest.advice.key)
         self.feed_count.setText(f"{len(self.cards)} message(s)")
@@ -1077,7 +1244,7 @@ class Main(QMainWindow):
         set_pill(self.live_pill, kind, short)
         set_pill(self.conn_pill, kind, res.get("label", short))
         self.obs_state.setText(res.get("detail", ""))
-        self.obs_state.setStyleSheet("color:#9aa3b2")
+        self.obs_state.setStyleSheet("color:#9a9ca5")
         if st == "connected":
             self.obs_hint.setText("Everything is set. The app connects to OBS automatically.")
             if prev and prev != "connected":
@@ -1107,12 +1274,6 @@ class Main(QMainWindow):
             return
         self._save_opts()
         self.session_dir = os.path.join(SESSIONS, datetime.now().strftime("%Y-%m-%d %H-%M-%S"))
-        try:
-            import psutil
-            if sys.platform == "win32":
-                psutil.Process().nice(psutil.BELOW_NORMAL_PRIORITY_CLASS)
-        except Exception:
-            pass
         light = self.res_combo.currentIndex() == 1
         self.monitor = Monitor(self.session_dir, interval=2.0 if light else 1.0, obs_port=self.port.value(), obs_password=self.pw.text(), light=light)
         self.monitor.start()
@@ -1140,7 +1301,7 @@ class Main(QMainWindow):
         self.mon_btn.setObjectName("primary")
         self.mon_btn.setStyle(self.mon_btn.style())
         self.mon_title.setText("Not watching")
-        self._set_dot("#6b7280")
+        self._set_dot("#6b6d75")
         dur = time.time() - (self.mon_started or time.time())
         self.mon_sub.setText(f"Last session saved ({analyze.fmt_t(dur)}, {m.counts['samples']:,} samples).")
         self.tray_stop.setEnabled(False)
@@ -1165,7 +1326,8 @@ class Main(QMainWindow):
                 return
             idx = len(lg.recordings) - 1 if lg.recordings else None
         else:
-            log_path, lg, idx = self._latest_recording()
+            with self._latest_lock:
+                log_path, lg, idx = self._latest_recording()
         if not log_path:
             self.post_local(Advice("need-log", "request", "after", "The OBS log for this recording is needed",
                                    "OBS → Help → Log Files → Show Log Files, then pick the newest file.",
@@ -1186,6 +1348,13 @@ class Main(QMainWindow):
                                    actions=[("Locate file…", "locate_video", None)]))
             vid = None
         mon = self._match_session(o)
+        size = 0
+        if vid:
+            try:
+                size = os.path.getsize(vid)
+            except OSError:
+                pass
+        self._est_ctx = {"size": size, "o": o, "deep": deep, "est": self._estimate(size, o, deep) if o.stop else None}
         self._analyzing = (o.start, os.path.basename(vid or o.path or ""))
         self.post_local(Advice("analysis-run", "status", "after", "Analyzing the recording…" + (" (deep scan)" if deep else ""),
                                "This reads the log, the PC data and the file. A deep scan of a long recording can take several minutes.", update=True))
@@ -1449,7 +1618,7 @@ class Main(QMainWindow):
         for c in (self.cb_autostart, self.cb_tray, self.cb_autoanalyze):
             opl.addWidget(c)
         opl.addLayout(rrow)
-        opl.addWidget(label("The app runs at low priority so the game and OBS always come first. Light mode halves its work; "
+        opl.addWidget(label("The app’s background work (PC checks and analysis) runs at low priority so the game and OBS always come first. Light mode halves its work; "
                             "use it on older PCs. Changes apply the next time you start watching. Its own CPU and memory use is shown at the bottom of the window.",
                             "muted", True))
         opl.addWidget(label("The app never changes OBS settings by itself. It only recommends changes, and pauses or resumes recording when you click the button.", "muted", True))
@@ -1657,11 +1826,10 @@ class Main(QMainWindow):
         self.cb_deep.setChecked(bool(self.settings.get("deep")))
         self.cb_deep.stateChanged.connect(self._save_opts)
         cl.addWidget(self.cb_deep)
-        self.prog = QProgressBar()
-        self.prog.setRange(0, 1000)
-        self.prog.setValue(0)
-        self.prog.setTextVisible(False)
-        self.prog.setFixedHeight(8)
+        self.est_lbl = label("", "muted", True)
+        self.est_lbl.setVisible(False)
+        cl.addWidget(self.est_lbl)
+        self.prog = WaveBar()
         self.prog.setVisible(False)
         cl.addWidget(self.prog)
         self.prog_lbl = label("", "muted", True)
@@ -1749,37 +1917,68 @@ class Main(QMainWindow):
         return best
 
     def refresh_latest(self):
+        """Update "Your latest recording". The file checks run in the background, because a sleeping
+        USB or network drive can take seconds to answer and would freeze the window."""
         if not hasattr(self, "latest_lbl"):
             return
         self._latest_t = time.time()
-        log_path, lg, idx = self._latest_recording()
-        if not lg:
+        if getattr(self, "_latest_busy", False):
+            self._latest_again = True
+            return
+        self._latest_busy = True
+        self._latest_again = False
+        last_video = getattr(self, "last_video", None)
+
+        def go():
+            info = None
+            try:
+                with self._latest_lock:
+                    log_path, lg, idx = self._latest_recording()
+                    if lg:
+                        o = lg.recordings[idx]
+                        vid = last_video or o.path
+                        exists = bool(vid) and os.path.isfile(vid)
+                        size = 0
+                        if exists:
+                            try:
+                                size = os.path.getsize(vid)
+                            except OSError:
+                                pass
+                        info = {"log": log_path, "o": o, "vid": vid, "exists": exists, "size": size,
+                                "mon": self._match_session(o)}
+                    else:
+                        info = {}
+            except Exception:
+                info = {}
+            self._bridge.latest.emit(info)
+        threading.Thread(target=go, daemon=True).start()
+
+    def _show_latest(self, info):
+        self._latest_busy = False
+        if getattr(self, "_latest_again", False):
+            QTimer.singleShot(0, self.refresh_latest)
+        if not info:
             self.latest_lbl.setText("No recordings found in the recent OBS logs yet.")
             self.latest_note.setText("Record something in OBS, then come back here. If OBS keeps its logs somewhere unusual, "
                                      "use the OBS Reports tab to pick a log.")
+            self.est_lbl.setVisible(False)
             return
-        o = lg.recordings[idx]
-        vid = getattr(self, "last_video", None) or o.path
-        exists = bool(vid) and os.path.isfile(vid)
+        o, vid, exists, size = info["o"], info["vid"], info["exists"], info["size"]
         bits = [f"<b>{report.E(os.path.basename(vid or '') or 'Recording')}</b>"]
         bits.append(f"Started {o.start:%b %d, %I:%M %p}")
         if o.stop:
-            bits.append("Length " + analyze.fmt_t(o.duration_seconds - (o.paused_seconds or 0)))
+            bits.append("Length " + analyze.fmt_t(o.duration_seconds))
         else:
             bits.append("Still recording")
-        if exists:
-            try:
-                bits.append(f"{os.path.getsize(vid) / 1073741824:.2f} GB")
-            except OSError:
-                pass
+        if size:
+            bits.append(f"{size / 1073741824:.2f} GB")
         if o.encode_total:
             bits.append(f"OBS encoding skips: {o.encode_skipped:,} ({100 * o.encode_skipped / o.encode_total:.2f}%)")
         self.latest_lbl.setText(" &nbsp;·&nbsp; ".join(bits))
-        notes = [f"OBS log: {os.path.basename(log_path)}."]
+        notes = [f"OBS log: {os.path.basename(info['log'])}."]
         if not exists:
             notes.append("The video file wasn’t found (moved or deleted?), so the analysis uses the OBS log and the app’s watching data only.")
-        mon = self._match_session(o)
-        if mon:
+        if info["mon"]:
             notes.append("This app was watching during this recording, so the report includes what the PC was doing at each problem.")
         else:
             notes.append("This app wasn’t watching during this recording. It can still check the OBS log and the file; "
@@ -1790,6 +1989,57 @@ class Main(QMainWindow):
         if self.worker and an and an[0] == o.start:
             notes.insert(0, "Analyzing this recording now; the progress is shown below.")
         self.latest_note.setText(" ".join(notes))
+        # time estimate
+        self._latest_est = None
+        if o.stop and not self.worker:
+            q = self._estimate(size, o, False)
+            d = self._estimate(size, o, True)
+            self._latest_est = (q, d)
+            self.est_lbl.setText(f"Estimated analysis time: {fmt_dur(q)} for the quick check, {fmt_dur(d)} with deep scan."
+                                 if exists else f"Estimated analysis time: {fmt_dur(q)} (log and watching data only).")
+            self.est_lbl.setVisible(True)
+        elif not self.worker:
+            self.est_lbl.setVisible(False)
+
+    # ---- analysis time estimate (learns from this PC's real times)
+    @staticmethod
+    def _px_scale(o):
+        vs = getattr(o, "video_settings", None)
+        try:
+            w, h = (int(x) for x in (vs.output_res or vs.base_res).lower().split("x"))
+            fps = vs.fps_value or 60.0
+        except Exception:
+            w, h, fps = 1920, 1080, 60.0
+        return max(0.05, (w * h * fps) / (3840 * 2160 * 60.0))
+
+    def _estimate(self, size, o, deep):
+        sp = self.settings.get("speed") or {}
+        read = sp.get("read_mbs", 150.0)            # quick check: ffprobe reads the whole file
+        k = sp.get("deep_k", 0.2)                    # deep scan: seconds per second of 4K60 video
+        t = 4.0 + (size / 1048576) / max(read, 5.0)
+        if deep and size:
+            t += k * (o.duration_seconds or 0) * self._px_scale(o)
+        return t
+
+    def _learn_speed(self, ctx, elapsed):
+        """After an analysis, nudge the estimates toward what this PC actually took."""
+        try:
+            size, o, deep = ctx["size"], ctx["o"], ctx["deep"]
+            if not size or elapsed < 3:
+                return
+            sp = dict(self.settings.get("speed") or {})
+            read = sp.get("read_mbs", 150.0)
+            if not deep:
+                got = (size / 1048576) / max(elapsed - 4.0, 0.5)
+                sp["read_mbs"] = round(min(2000.0, max(10.0, 0.5 * read + 0.5 * got)), 1)
+            elif o is not None and o.duration_seconds:
+                quick = 4.0 + (size / 1048576) / max(read, 5.0)
+                got = max(0.01, elapsed - quick) / (o.duration_seconds * self._px_scale(o))
+                sp["deep_k"] = round(min(3.0, max(0.02, 0.5 * sp.get("deep_k", 0.2) + 0.5 * got)), 4)
+            self.settings["speed"] = sp
+            save_settings(self.settings)
+        except Exception:
+            pass
 
     # ---- last report card
     @staticmethod
@@ -2026,6 +2276,20 @@ class Main(QMainWindow):
             self._auto_pick_session()
 
     def _session_range(self, p):
+        cache = self.__dict__.setdefault("_range_cache", {})
+        try:
+            st = os.stat(p)
+            key = (st.st_mtime, st.st_size)
+        except OSError:
+            return None
+        hit = cache.get(p)
+        if hit and hit[0] == key:
+            return hit[1]
+        rng = self._session_range_read(p)
+        cache[p] = (key, rng)
+        return rng
+
+    def _session_range_read(self, p):
         try:
             with open(p, "rb") as f:
                 first = None
@@ -2092,6 +2356,12 @@ class Main(QMainWindow):
             self._start_worker(None, {0: p}, None, self.cb_deep.isChecked(), None)
 
     def _start_worker(self, log, vids, mon, deep, sel):
+        ctx = getattr(self, "_est_ctx", None)
+        if not ctx or ctx.get("deep") != deep:
+            ctx = {"size": 0, "o": None, "deep": deep, "est": None}
+        self._est_ctx = None
+        ctx["t0"] = time.monotonic()
+        self._run_ctx = ctx
         self.worker = AnalyzeWorker(log, vids, mon, deep, sel)
         if not hasattr(self, "_threads"):
             self._threads = set()
@@ -2105,7 +2375,9 @@ class Main(QMainWindow):
         self.cancel_btn.setEnabled(True)
         self.prog.setValue(0)
         self.prog.setVisible(True)
-        self.prog_lbl.setText("Starting…")
+        est = ctx.get("est")
+        self.prog_lbl.setText("Starting…" + (f" Estimated time: {fmt_dur(est)}." if est else ""))
+        self.est_lbl.setVisible(False)
         self.worker.start()
 
     def cancel_analysis(self):
@@ -2115,7 +2387,28 @@ class Main(QMainWindow):
 
     def _prog(self, msg, p):
         self.prog.setValue(int(p * 1000))
-        self.prog_lbl.setText(msg)
+        self.prog_lbl.setText(msg + "  ·  " + self._time_left(p))
+
+    def _time_left(self, p):
+        """Countdown that blends the up-front estimate with how fast this run is actually going."""
+        ctx = getattr(self, "_run_ctx", None) or {}
+        el = time.monotonic() - ctx.get("t0", time.monotonic())
+        est = ctx.get("est")
+        guesses = []
+        if est:
+            guesses.append((max(0.0, est - el), 1.0 - min(1.0, p * 1.6)))
+        if p >= 0.03 and el >= 2:
+            guesses.append((el * (1 - p) / p, min(1.0, p * 1.6) if est else 1.0))
+        tot = sum(w for _, w in guesses)
+        if not guesses or tot <= 0:
+            return "Working out the time left…"
+        left = sum(g * w for g, w in guesses) / tot
+        if left < 20:
+            return "Almost done"
+        if left < 60:
+            return "Less than a minute left"
+        m = int(round(left / 60.0))
+        return f"About {m} min left" if m < 60 else f"About {m // 60} h {m % 60} min left"
 
     def _finish(self):
         self.worker = None
@@ -2123,8 +2416,12 @@ class Main(QMainWindow):
             b.setEnabled(True)
         self.cancel_btn.setEnabled(False)
         self.prog.setVisible(False)
+        QTimer.singleShot(0, self.refresh_latest)
 
     def _done(self, res, path):
+        ctx = getattr(self, "_run_ctx", None)
+        if ctx and ctx.get("o") is not None:
+            self._learn_speed(ctx, time.monotonic() - ctx["t0"])
         self._finish()
         self._analyzing = None
         cmp_, prev = None, None
@@ -2152,7 +2449,7 @@ class Main(QMainWindow):
             pass
         sev_col = {"critical": "#ff5d5d", "warning": "#f5b748", "info": "#5fa8ff", "good": "#3ecf8e"}
         inc = [i for i in res.incidents if i.kind != "pause"]
-        html = f"<p style='color:#9aa3b2'>{report.E(fname or 'Recording')} &nbsp;·&nbsp; analyzed {datetime.now():%b %d, %I:%M %p} &nbsp;·&nbsp; {len(res.findings)} findings, {len(inc)} timeline incidents</p>"
+        html = f"<p style='color:#9a9ca5'>{report.E(fname or 'Recording')} &nbsp;·&nbsp; analyzed {datetime.now():%b %d, %I:%M %p} &nbsp;·&nbsp; {len(res.findings)} findings, {len(inc)} timeline incidents</p>"
         if cmp_:
             html += f"<p><b>Compared with your previous recording:</b> {report.E(cmp_[0])}</p>"
         for f in res.findings[:12]:
@@ -2251,9 +2548,9 @@ Click <b>Update now</b> and it downloads the installer, closes, updates and open
 <b>WebSocket off</b>, <b>Password rejected</b> or <b>port mismatch</b>, Settings shows exactly what to do; <b>Check again</b> retries right away.
 Without the connection, the app still reads the log, the PC data and the file, but it can't see skips the second they happen or pause recording for you.</p>
 <h3>Light on your PC</h3>
-<p>The app and the tools it starts run at low priority, so your game and OBS always come first. In <b>Settings → Resource use</b>, <b>Light</b> mode checks every 2 seconds and scans programs less often — use it on older PCs.
+<p>The app’s background work (the PC checks and the analysis, which runs as a separate process) runs at low priority, while the window itself stays responsive, so your game and OBS always come first. In <b>Settings → Resource use</b>, <b>Light</b> mode checks every 2 seconds and scans programs less often — use it on older PCs.
 The app's own CPU and memory use is shown at the bottom right of the window. While it's minimized to the tray it stops drawing the dashboard.</p>
-<p style='color:#9aa3b2'>The app never changes OBS settings by itself. Likely causes are educated guesses from what the PC was doing at that moment.</p>
+<p style='color:#9a9ca5'>The app never changes OBS settings by itself. Likely causes are educated guesses from what the PC was doing at that moment.</p>
 <h3>What the report checks</h3>
 <ul>
 <li>Rendering-lag and encoding-lag skips, with clock time <i>and</i> position in the video</li>
@@ -2265,7 +2562,7 @@ The app's own CPU and memory use is shown at the bottom right of the window. Whi
 <li>What the PC was doing at each problem: GPU 3D and encoder load, CPU, RAM, recording drive busy/latency, GPU temperature, busiest programs</li>
 <li>Windows events: GPU driver resets, disk/USB errors, crashes</li>
 </ul>
-<p style='color:#9aa3b2'>Data folder: {DATA}<br>Version {VERSION}</p>
+<p style='color:#9a9ca5'>Data folder: {DATA}<br>Version {VERSION}</p>
 </div>""")
         return w
 
@@ -2339,7 +2636,7 @@ def selftest(out):
         lines.append("ffprobe: " + str(video_probe._tool("ffprobe")))
         lines.append("ffmpeg: " + str(video_probe._tool("ffmpeg")))
         app = QApplication(sys.argv)
-        app.setStyleSheet(app_style())
+        apply_theme(app)
         w = Main()
         w.run_preflight()
         system_check.run_all()
@@ -2349,6 +2646,15 @@ def selftest(out):
         m.stop()
         lines.append(f"monitor samples: {m.counts['samples']}")
         lines.append(f"pdh: {bool((m.latest or {}).get('disks'))}")
+        from analyzer import proc          # the analysis process must start in the packaged app too
+        job = proc.Job((None, {}, None, False, None), os.path.join(DATA, "_selftest"))
+        job.start()
+        msg, t_end = None, time.time() + 90
+        while msg is None and time.time() < t_end:
+            msg = job.get(0.5)
+        lines.append(f"analysis process: {msg[0] if msg else 'no reply'}")
+        if not msg or "unexpectedly" in str(msg[-1]):
+            raise RuntimeError("analysis process did not reply: " + repr(msg))
         lines.append("OK")
         code = 0
     except Exception:
@@ -2397,25 +2703,11 @@ def main():
             ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("bloodrive.liverecordinganalyzer")
         except Exception:
             pass
-    try:   # stay out of the game's and OBS's way
-        import psutil
-        if sys.platform == "win32":
-            psutil.Process().nice(psutil.BELOW_NORMAL_PRIORITY_CLASS)
-    except Exception:
-        pass
+    # The window itself runs at normal priority so it stays responsive. The background work that could
+    # compete with the game (the PC monitor thread and the analysis process) lowers its own priority.
     app = QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
-    app.setStyle("Fusion")
-    pal = QPalette()
-    pal.setColor(QPalette.Window, QColor("#0f1115"))
-    pal.setColor(QPalette.WindowText, QColor("#e7e9ee"))
-    pal.setColor(QPalette.Base, QColor("#171a21"))
-    pal.setColor(QPalette.Text, QColor("#e7e9ee"))
-    pal.setColor(QPalette.Button, QColor("#232834"))
-    pal.setColor(QPalette.ButtonText, QColor("#e7e9ee"))
-    pal.setColor(QPalette.Highlight, QColor("#c23b3b"))
-    app.setPalette(pal)
-    app.setStyleSheet(app_style())
+    apply_theme(app)
     app.setQuitOnLastWindowClosed(False)
     w = Main()
     if crashed_last_time:
@@ -2441,4 +2733,6 @@ def main():
 
 
 if __name__ == "__main__":
+    import multiprocessing
+    multiprocessing.freeze_support()      # the analysis runs in a child process (needed for the packaged app)
     main()

@@ -2,7 +2,7 @@
 #define AppExe "Live Recording Analyzer.exe"
 #define OldName "OBS Session Analyzer"
 #ifndef AppVersion
-  #define AppVersion "1.3.2"
+  #define AppVersion "1.4.0"
 #endif
 
 [Setup]

@@ -33,7 +33,7 @@
     const add = (tag, a, txt) => { const n = document.createElementNS(NS, tag); for (const k in a) n.setAttribute(k, a[k]); if (txt) n.textContent = txt; svg.append(n); return n; };
     const x = (s) => L + (w * s) / Math.max(c.span, 1), y = (v) => T + h * (1 - Math.min(Math.max(v, 0), 100) / 100);
     for (const g of [0, 25, 50, 75, 100]) {
-      add("line", { x1: L, x2: W - R, y1: y(g), y2: y(g), stroke: "#2a2f3a" });
+      add("line", { x1: L, x2: W - R, y1: y(g), y2: y(g), stroke: "#2c2c33" });
       add("text", { x: L - 6, y: y(g) + 4, fill: "#9aa3b2", "font-size": 11, "text-anchor": "end" }, String(g));
     }
     const t0 = new Date(c.t0);

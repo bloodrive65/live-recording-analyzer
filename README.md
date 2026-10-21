@@ -8,7 +8,7 @@ Website, help and downloads: https://bloodrive65.github.io/live-recording-analyz
 - **Check OBS settings:** reads your OBS profile, scenes and sources and the latest OBS log, with a progress indicator while it works, and lists only what would cause a problem in your next recording. Steps match your OBS setup (Simple or Advanced output mode, the capture source type, and so on). Lower-priority items are marked as tips.
 - **During recording:** a live Advisor feed plus Windows pop-ups, so you don't have to watch the app. It reports skipped frames along with what the PC was doing at that second, catches files that stop growing, drive stalls and late audio, and offers a Pause recording button when that helps.
 - **After recording:** an automatic report with timestamps (clock time and video position), likely causes and fixes. An optional deep scan finds repeated or frozen frames inside the video.
-- **Light on resources:** runs at low priority; a Light mode halves its work; its own CPU and memory use is shown in the status bar.
+- **Light on resources:** background work runs at low priority (analysis runs in its own process, so the window stays responsive); a Light mode halves its work; its own CPU and memory use is shown in the status bar.
 
 The app never changes OBS settings on its own.
 
