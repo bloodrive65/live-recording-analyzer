@@ -31,7 +31,7 @@ from analyzer import weblink, updater
 
 APP_NAME = "Live Recording Analyzer"
 OLD_NAME = "OBS Session Analyzer"
-VERSION = "1.4.3"
+VERSION = "1.4.4"
 
 
 def resource(name):
@@ -66,6 +66,42 @@ except Exception:
     pass
 SESSIONS = os.path.join(DATA, "Sessions")
 REPORTS = os.path.join(DATA, "Reports")
+NO_REPORT = "No report yet. Use one of the sections above to analyze a recording."
+
+_QUICK_CACHE = {}
+_QUICK_LOCK = threading.Lock()
+_WRITE_RE = re.compile(rb"Writing [^'\r\n]*?file '([^'\r\n]*)'")
+_NAME_RE = re.compile(r"(\d{4})-(\d\d)-(\d\d) (\d\d)-(\d\d)-(\d\d)")
+
+
+def quick_log_info(path):
+    """Skim an OBS log: how many recordings and which files. A plain text search (milliseconds per log),
+    cached until OBS writes to the log again. The full read happens only when a log is actually analyzed."""
+    try:
+        st = os.stat(path)
+    except OSError:
+        return None
+    key = (st.st_mtime, st.st_size)
+    with _QUICK_LOCK:
+        hit = _QUICK_CACHE.get(path)
+        if hit and hit[0] == key:
+            return hit[1]
+    try:
+        with open(path, "rb") as f:
+            data = f.read()
+    except OSError:
+        return None
+    starts, stops = data.count(b"==== Recording Start"), data.count(b"==== Recording Stop")
+    m = _NAME_RE.search(os.path.basename(path))
+    try:
+        opened = datetime(*map(int, m.groups())) if m else None
+    except ValueError:
+        opened = None
+    info = {"path": path, "name": os.path.basename(path), "opened": opened, "written": datetime.fromtimestamp(st.st_mtime),
+            "recs": starts, "open": starts > stops, "files": [x.decode("utf-8", "replace") for x in _WRITE_RE.findall(data)]}
+    with _QUICK_LOCK:
+        _QUICK_CACHE[path] = (key, info)
+    return info
 SETTINGS_FILE = os.path.join(DATA, "settings.json")
 for d in (SESSIONS, REPORTS):
     os.makedirs(d, exist_ok=True)
@@ -237,6 +273,8 @@ def fmt_dur(sec):
 class _Bridge(QObject):
     """Hands results from background threads to the window thread."""
     latest = Signal(object)
+    logs = Signal(object)
+    vidmatch = Signal(object)
 
 
 class WaveBar(QWidget):
@@ -922,6 +960,8 @@ class Main(QMainWindow):
         self._ui_q = queue.Queue()
         self._bridge = _Bridge(self)
         self._bridge.latest.connect(self._show_latest)
+        self._bridge.logs.connect(self._show_obs_logs)
+        self._bridge.vidmatch.connect(self._show_vid_match)
         self._latest_lock = threading.Lock()
         self._live_job = False
         self.last_video = None
@@ -947,11 +987,19 @@ class Main(QMainWindow):
         self.refresh_sessions()
         self.refresh_reports()
         self.refresh_latest()
-        tabs.currentChanged.connect(lambda i: self.refresh_latest() if i == 1 else None)
+        tabs.currentChanged.connect(self._tab_changed)
         self.perf = PerfWatch(self, os.path.join(DATA, "perf.log"))
         self.perf.where = lambda: f"{VERSION}, tab {self.tabs.currentIndex()}, {'analyzing' if self.worker else 'idle'}, {'watching' if self.monitor else 'not watching'}"
         if self.settings.get("autostart"):
             QTimer.singleShot(800, self.start_monitor)
+
+    def _tab_changed(self, i):
+        if i == 1:
+            self._update_auto_note()
+            self.refresh_latest()
+        elif i == 2:
+            self.refresh_reports()
+            self.refresh_obs_logs(force=True)
 
     # ------------------------------------------------------------------ live tab
     def _live_tab(self):
@@ -1348,7 +1396,7 @@ class Main(QMainWindow):
             self.post_local(Advice("need-log", "request", "after", "The OBS log for this recording is needed",
                                    "OBS → Help → Log Files → Show Log Files, then pick the newest file.",
                                    actions=[("Browse for log…", "browse_log", None)]))
-            self._an_msg("No recordings were found in the recent OBS logs. Use “Analyze a different recording” lower on the Analyzer tab to pick a log.")
+            self._an_msg("No recordings were found in the recent OBS logs. Use “Analyze a recording from an OBS log” lower on the Analyzer tab to pick a log.")
             return
         if idx is None:
             self.post_local(Advice("no-rec", "request", "after", "That log has no recordings in it",
@@ -1688,6 +1736,7 @@ class Main(QMainWindow):
                               "toasts": self.toast_combo.currentIndex(), "sound": self.cb_sound.isChecked(),
                               "deep": self.cb_deep.isChecked() if hasattr(self, "cb_deep") else False,
                               "light": self.res_combo.currentIndex() if hasattr(self, "res_combo") else 0})
+        self._update_auto_note()
         if hasattr(self, "cb_ask_setup"):
             self.settings["setup_remember"] = not self.cb_ask_setup.isChecked()
         if hasattr(self, "cb_updates"):
@@ -1820,7 +1869,7 @@ class Main(QMainWindow):
         cl.setContentsMargins(18, 14, 18, 14)
         cl.setSpacing(8)
         hdr = QHBoxLayout()
-        hdr.addWidget(label("Your latest recording", "h2"))
+        hdr.addWidget(label("Analyze your last recording", "h2"))
         hdr.addStretch(1)
         rb = QPushButton("Refresh")
         rb.setToolTip("Look for a newer recording")
@@ -1832,6 +1881,9 @@ class Main(QMainWindow):
         cl.addWidget(self.latest_lbl)
         self.latest_note = label("", "muted", True)
         cl.addWidget(self.latest_note)
+        self.auto_note = label("", "muted", True)
+        cl.addWidget(self.auto_note)
+        self._update_auto_note()
         row = QHBoxLayout()
         self.an_btn = QPushButton("Analyze my last recording")
         self.an_btn.setObjectName("primary")
@@ -1857,12 +1909,16 @@ class Main(QMainWindow):
         cl.addWidget(self.prog_lbl)
         root.addWidget(c)
 
+        root.addWidget(self._log_card())
+        root.addWidget(self._video_card())
+
         rc = card()
+        self.last_card = rc
         rl = QVBoxLayout(rc)
         rl.setContentsMargins(18, 14, 18, 14)
         rl.setSpacing(8)
         rl.addWidget(label("Last report", "h2"))
-        self.res_title = label("No report yet. Click “Analyze my last recording” after you record something.", "muted", True)
+        self.res_title = label(NO_REPORT, "muted", True)
         rl.addWidget(self.res_title)
         self.summary = QTextBrowser()
         self.summary.setOpenExternalLinks(False)
@@ -1890,7 +1946,6 @@ class Main(QMainWindow):
         self.res_hint.setVisible(False)
         rl.addWidget(self.res_hint)
         root.addWidget(rc)
-        root.addWidget(self._other_card())
         root.addStretch(1)
         QTimer.singleShot(0, self._restore_last_report)
         return sc
@@ -1983,7 +2038,7 @@ class Main(QMainWindow):
         if not info:
             self.latest_lbl.setText("No recordings found in the recent OBS logs yet.")
             self.latest_note.setText("Record something in OBS, then come back here. If OBS keeps its logs somewhere unusual, "
-                                     "use “Analyze a different recording” below to pick a log.")
+                                     "use “Analyze a recording from an OBS log” below to pick a log.")
             self.est_lbl.setVisible(False)
             return
         o, vid, exists, size = info["o"], info["vid"], info["exists"], info["size"]
@@ -2040,7 +2095,7 @@ class Main(QMainWindow):
         read = sp.get("read_mbs", 150.0)            # quick check: ffprobe reads the whole file
         k = sp.get("deep_k", 0.2)                    # deep scan: seconds per second of 4K60 video
         t = 4.0 + (size / 1048576) / max(read, 5.0)
-        if deep and size:
+        if deep and size and o is not None:
             t += k * (o.duration_seconds or 0) * self._px_scale(o)
         return t
 
@@ -2083,6 +2138,7 @@ class Main(QMainWindow):
         lr = self.settings.get("last_report") or {}
         if lr.get("path") and os.path.isfile(lr["path"]):
             self._show_result(lr)
+        QTimer.singleShot(100, lambda: self.an_scroll.ensureWidgetVisible(self.last_card, 0, 40))
 
     def _show_result(self, lr):
         col = {"critical": "#ff5d5d", "warning": "#f5b748", "good": "#3ecf8e"}.get(lr.get("sev"), "#e7e9ee")
@@ -2118,28 +2174,46 @@ class Main(QMainWindow):
             QDesktopServices.openUrl(QUrl.fromLocalFile(path))
 
     # ------------------------------------------------------------------ OBS reports tab
-    def _other_card(self):
-        """Analyzer tab: analyze an older recording from an OBS log, or a video file by itself."""
+    def _busy_note(self):
+        """Amber line shown on a card while another analysis runs (only one runs at a time)."""
+        n = label("Another analysis is running (see the progress in “Analyze your last recording” at the top). "
+                  "These buttons work again when it finishes, or click Cancel at the top to stop it.", None, True)
+        n.setStyleSheet("color:#f5b748")
+        n.setVisible(bool(self.worker))
+        self.__dict__.setdefault("busy_notes", []).append(n)
+        return n
+
+    def _update_auto_note(self):
+        if not hasattr(self, "auto_note"):
+            return
+        if self.settings.get("auto_after"):
+            self.auto_note.setText("Automatic analysis is on (Settings → Behavior), so each recording is also analyzed by itself "
+                                   "a few minutes after you stop it.")
+        else:
+            self.auto_note.setText("Nothing is analyzed until you click the button.")
+
+    def _log_card(self):
+        """Analyzer tab, section 2: analyze recordings listed in an OBS log."""
         c1 = card()
+        self.log_card = c1
         g = QGridLayout(c1)
         g.setContentsMargins(18, 14, 18, 14)
         g.setVerticalSpacing(8)
-        g.addWidget(label("Analyze a different recording", "h2"), 0, 0, 1, 3)
-        g.addWidget(label("For an older recording, or a video that wasn’t your latest. The progress shows at the top of this tab.", "muted", True), 1, 0, 1, 3)
-        self.other_busy = label("Another analysis is running (see the progress at the top). These buttons work again when it finishes, "
-                                "or click Cancel at the top to stop it.", None, True)
-        self.other_busy.setStyleSheet("color:#f5b748")
-        self.other_busy.setVisible(False)
-        g.addWidget(self.other_busy, 2, 0, 1, 3)
-        g.addWidget(label("From an OBS log", "advT"), 3, 0, 1, 3)
-        g.addWidget(label("OBS writes a new log each time it opens. Pick a log (or Browse for one), tick the recordings to check, then click "
-                          "Analyze selected. Double-click a row to point to a file you moved.", "muted", True), 4, 0, 1, 3)
+        g.addWidget(label("Analyze a recording from an OBS log", "h2"), 0, 0, 1, 3)
+        g.addWidget(label("OBS writes a new log each time it opens, listing every recording made while it was open. Pick a log "
+                          "(or Browse for one), tick the recordings to check, then click Analyze selected. Double-click a row to "
+                          "point to a file you moved. This app reads OBS Studio logs only; for a video from another recording "
+                          "program, use “Analyze a different video” below.", "muted", True), 1, 0, 1, 3)
+        g.addWidget(self._busy_note(), 2, 0, 1, 3)
+        self.log_pick_note = label("", None, True)
+        self.log_pick_note.setVisible(False)
+        g.addWidget(self.log_pick_note, 3, 0, 1, 3)
         self.log_combo = QComboBox()
         self.log_combo.currentIndexChanged.connect(self._log_changed)
-        g.addWidget(self.log_combo, 5, 0, 1, 2)
+        g.addWidget(self.log_combo, 4, 0, 1, 2)
         b = QPushButton("Browse…")
         b.clicked.connect(self.browse_log)
-        g.addWidget(b, 5, 2)
+        g.addWidget(b, 4, 2)
         self.rec_tree = QTreeWidget()
         self.rec_tree.setHeaderLabels(["Recording", "Length", "OBS skips", "File"])
         self.rec_tree.setRootIsDecorated(False)
@@ -2148,42 +2222,271 @@ class Main(QMainWindow):
             self.rec_tree.header().setSectionResizeMode(k, QHeaderView.ResizeToContents)
         self.rec_tree.header().setSectionResizeMode(3, QHeaderView.Stretch)
         self.rec_tree.setMinimumHeight(120)
-        g.addWidget(self.rec_tree, 6, 0, 1, 3)
-        g.addWidget(label("Watching data"), 7, 0)
+        g.addWidget(self.rec_tree, 5, 0, 1, 3)
+        g.addWidget(label("Watching data"), 6, 0)
         self.sess_combo = QComboBox()
         self.sess_combo.setToolTip("What this app recorded about the PC during that time. Picked automatically when one matches.")
-        g.addWidget(self.sess_combo, 7, 1, 1, 2)
+        g.addWidget(self.sess_combo, 6, 1, 1, 2)
         row2 = QHBoxLayout()
         self.an_sel_btn = QPushButton("Analyze selected")
+        self.an_sel_btn.setObjectName("primary")
         self.an_sel_btn.clicked.connect(self.run_analysis)
+        row2.setSpacing(12)
         row2.addWidget(self.an_sel_btn)
+        row2.addWidget(label("Uses the Deep scan setting above.", "muted"))
         row2.addStretch(1)
-        g.addLayout(row2, 8, 0, 1, 3)
-        g.addWidget(label("A video file only", "advT"), 9, 0, 1, 3)
-        g.addWidget(label("Checks the file by itself: missing frames, frame rate, color tags and audio. Without an OBS log it can’t compare "
-                          "your OBS settings or count the frames OBS skipped.", "muted", True), 10, 0, 1, 3)
-        row3 = QHBoxLayout()
-        self.vid_btn = QPushButton("Choose a video file…")
-        self.vid_btn.clicked.connect(self.analyze_video_only)
-        row3.addWidget(self.vid_btn)
-        row3.addStretch(1)
-        g.addLayout(row3, 11, 0, 1, 3)
+        g.addLayout(row2, 7, 0, 1, 3)
         g.setColumnStretch(1, 1)
         return c1
 
+    def _video_card(self):
+        """Analyzer tab, section 3: any video from anywhere, with the full analysis when its OBS log can be found."""
+        c = card()
+        self.video_card = c
+        v = QVBoxLayout(c)
+        v.setContentsMargins(18, 14, 18, 14)
+        v.setSpacing(8)
+        v.addWidget(label("Analyze a different video", "h2"))
+        v.addWidget(label("Browse to any video on any drive. The app looks for it in your OBS logs. If it’s there, the video gets the "
+                          "same full analysis as your last recording: OBS settings, frames OBS skipped, the file itself, and what the "
+                          "PC was doing if this app was watching. If it isn’t (for example, a video from another program), the file "
+                          "is checked by itself: missing frames, frame rate, color tags and audio.", "muted", True))
+        v.addWidget(self._busy_note())
+        row = QHBoxLayout()
+        b = QPushButton("Browse for a video…")
+        b.clicked.connect(self.choose_video)
+        row.addWidget(b)
+        self.vid_path_lbl = label("No video chosen.", "muted")
+        row.addWidget(self.vid_path_lbl, 1)
+        v.addLayout(row)
+        self.vid_match_lbl = label("", None, True)
+        self.vid_match_lbl.setTextFormat(Qt.RichText)
+        self.vid_match_lbl.setVisible(False)
+        v.addWidget(self.vid_match_lbl)
+        row3 = QHBoxLayout()
+        self.vid_btn = QPushButton("Analyze this video")
+        self.vid_btn.setObjectName("primary")
+        self.vid_btn.setEnabled(False)
+        self.vid_btn.clicked.connect(self.analyze_video)
+        row3.setSpacing(12)
+        row3.addWidget(self.vid_btn)
+        row3.addWidget(label("Uses the Deep scan setting above.", "muted"))
+        row3.addStretch(1)
+        v.addLayout(row3)
+        self._vid_choice = None
+        return c
+
+    # ---- section 3 helpers
+    def choose_video(self):
+        p, _ = QFileDialog.getOpenFileName(self, "Choose a video", self.settings.get("last_video_dir", ""),
+                                           "Video (*.mkv *.mp4 *.mov *.flv *.ts *.m4v *.avi *.webm);;All files (*)")
+        if not p:
+            return
+        self.settings["last_video_dir"] = os.path.dirname(p)
+        save_settings(self.settings)
+        self._vid_choice = {"path": p, "pending": True}
+        self.vid_path_lbl.setText(p)
+        self.vid_path_lbl.setToolTip(p)
+        self.vid_match_lbl.setText("Looking for this video in your OBS logs…")
+        self.vid_match_lbl.setVisible(True)
+        self.vid_btn.setEnabled(False)
+
+        def go():
+            out = {"path": p}
+            try:
+                out.update(self._find_video_in_logs(p))
+            except Exception:
+                traceback.print_exc()
+            self._bridge.vidmatch.emit(out)
+        threading.Thread(target=go, daemon=True).start()
+
+    def _all_log_paths(self):
+        logs = obs_log.latest_logs(500)
+        for x in self.settings.get("extra_logs", []):
+            if os.path.isfile(x) and x not in logs:
+                logs.append(x)
+        return logs
+
+    def _find_video_in_logs(self, p):
+        """Which OBS log recorded this file. A quick text search of each log first, then a full read of the one match."""
+        name = os.path.basename(p).lower()
+        stem = os.path.splitext(name)[0]
+        best = None
+        for lp in self._all_log_paths():
+            info = quick_log_info(lp)
+            if not info:
+                continue
+            for f in info["files"]:
+                fb = os.path.basename(f.replace("\\", "/")).lower()
+                if fb == name:
+                    best = lp
+                    break
+                if best is None and os.path.splitext(fb)[0] == stem:     # remuxed, e.g. .mkv -> .mp4
+                    best = lp
+            if best and best == lp:
+                break
+        if not best:
+            return {"probe_o": self._quick_probe(p)}
+        lg = self._parsed(best)
+        idx = None
+        for i, o in enumerate(lg.recordings):
+            fb = os.path.basename((o.path or "").replace("\\", "/")).lower()
+            if fb == name or os.path.splitext(fb)[0] == stem:
+                idx = i
+        if idx is None:
+            return {"probe_o": self._quick_probe(p)}
+        o = lg.recordings[idx]
+        size = 0
+        try:
+            size = os.path.getsize(p)
+        except OSError:
+            pass
+        return {"log": best, "idx": idx, "o": o, "mon": self._match_session(o), "size": size}
+
+    @staticmethod
+    def _quick_probe(p):
+        """Length, size and frame rate from the file's header only (fast), for the time estimate."""
+        from types import SimpleNamespace as NS
+        import subprocess as sp
+        from analyzer import video_probe
+        try:
+            r = sp.run([video_probe.ffprobe_path(), "-v", "error", "-select_streams", "v:0", "-show_entries",
+                        "stream=width,height,avg_frame_rate:format=duration", "-of", "json", p],
+                       capture_output=True, text=True, timeout=20, creationflags=getattr(sp, "CREATE_NO_WINDOW", 0))
+            d = json.loads(r.stdout or "{}")
+            st = (d.get("streams") or [{}])[0]
+            a, b = (st.get("avg_frame_rate") or "60/1").split("/")
+            fps = float(a) / float(b) if float(b) else 60.0
+            return NS(duration_seconds=float((d.get("format") or {}).get("duration") or 0), stop=True,
+                      video_settings=NS(output_res=f"{st.get('width', 1920)}x{st.get('height', 1080)}", base_res="", fps_value=fps))
+        except Exception:
+            return None
+
+    def _show_vid_match(self, m):
+        if not self._vid_choice or m.get("path") != self._vid_choice.get("path"):
+            return
+        self._vid_choice = m
+        try:
+            size = m.get("size") or os.path.getsize(m["path"])
+        except OSError:
+            size = 0
+        m["size"] = size
+        if m.get("log"):
+            o = m["o"]
+            txt = (f"<span style='color:#3ecf8e'>Found in OBS log {report.E(os.path.basename(m['log']))}</span> "
+                   f"(recorded {o.start:%b %d, %I:%M %p}" + (f", length {analyze.fmt_t(o.duration_seconds)}" if o.stop else "") + "). "
+                   "It gets the full analysis: OBS settings, frames OBS skipped and the file"
+                   + (", plus what the PC was doing (this app was watching)." if m.get("mon") else
+                      ". This app wasn’t watching during it, so the report can’t show what the PC was doing."))
+        else:
+            o = m.get("probe_o")
+            txt = ("<span style='color:#f5b748'>Not found in your OBS logs.</span> It may be from another program, or its log was "
+                   "deleted (OBS keeps a limited number). The file will be checked by itself: missing frames, frame rate, "
+                   "color tags and audio.")
+        q = self._estimate(size, o, False)
+        d = self._estimate(size, o, True) if o is not None and size else None
+        txt += f"<br><span style='color:#9a9ca5'>Estimated time: {fmt_dur(q)}" + (f", {fmt_dur(d)} with deep scan" if d else "") + ".</span>"
+        self.vid_match_lbl.setText(txt)
+        self.vid_match_lbl.setVisible(True)
+        self.vid_btn.setEnabled(not self.worker)
+
+    def analyze_video(self):
+        m = self._vid_choice
+        if self.worker or not m or m.get("pending"):
+            return
+        p = m["path"]
+        if not os.path.isfile(p):
+            QMessageBox.information(self, APP_NAME, "That video can’t be opened anymore. Browse for it again.")
+            return
+        deep = self.cb_deep.isChecked()
+        if m.get("log"):
+            o = m["o"]
+            self._est_ctx = {"size": m["size"], "o": o, "deep": deep, "est": self._estimate(m["size"], o, deep)}
+            self._start_worker(m["log"], {m["idx"]: p}, m.get("mon"), deep, [m["idx"]])
+        else:
+            o = m.get("probe_o")
+            self._est_ctx = {"size": m["size"], "o": o, "deep": deep, "est": self._estimate(m["size"], o, deep)}
+            self._start_worker(None, {0: p}, None, deep, None)
+
+    def _parsed(self, p):
+        """Full read of an OBS log, cached until OBS writes to it again."""
+        with self._latest_lock:
+            cache = self.__dict__.setdefault("_log_cache", {})
+            st = os.stat(p)
+            key = (st.st_mtime, st.st_size)
+            if cache.get(p, (None,))[0] != key:
+                cache[p] = (key, obs_log.parse(p))
+            return cache[p][1]
+
+    # ------------------------------------------------------------------ OBS Reports tab
     def _reports_tab(self):
         w = QWidget()
         root = QVBoxLayout(w)
         root.setContentsMargins(22, 18, 22, 18)
         root.setSpacing(12)
 
+        intro = card()
+        il = QVBoxLayout(intro)
+        il.setContentsMargins(18, 12, 18, 12)
+        il.addWidget(label("This page only lists files. It doesn’t analyze any video, current or past.", "h2"))
+        il.addWidget(label("Use it to look through the logs OBS has written and to open finished reports on the Live Recording "
+                           "Analyzer website. To analyze, pick a log below and click “Analyze on the Analyzer tab”, or go to the "
+                           "Analyzer tab.", "muted", True))
+        root.addWidget(intro)
+
+        lc = card()
+        ll = QVBoxLayout(lc)
+        ll.setContentsMargins(18, 14, 18, 14)
+        ll.setSpacing(8)
+        hdr = QHBoxLayout()
+        hdr.addWidget(label("OBS log files", "h2"))
+        hdr.addStretch(1)
+        self.logs_status = label("", "muted")
+        hdr.addWidget(self.logs_status)
+        rb = QPushButton("Refresh")
+        rb.clicked.connect(lambda: self.refresh_obs_logs(force=True))
+        hdr.addWidget(rb)
+        ll.addLayout(hdr)
+        ll.addWidget(label("Every log OBS has written, newest first. OBS starts a new one each time it opens. "
+                           "This list updates by itself while this page is open.", "muted", True))
+        self.obslog_tree = QTreeWidget()
+        self.obslog_tree.setHeaderLabels(["OBS opened", "Last written", "Recordings", "Analyzed", "Log file"])
+        self.obslog_tree.setRootIsDecorated(False)
+        for k in range(4):
+            self.obslog_tree.header().setSectionResizeMode(k, QHeaderView.ResizeToContents)
+        self.obslog_tree.header().setSectionResizeMode(4, QHeaderView.Stretch)
+        self.obslog_tree.itemDoubleClicked.connect(lambda *_: self.send_log_to_analyzer())
+        self.obslog_tree.setMinimumHeight(110)
+        ll.addWidget(self.obslog_tree, 1)
+        row = QHBoxLayout()
+        b = QPushButton("Analyze on the Analyzer tab")
+        b.setObjectName("primary")
+        b.setToolTip("Opens this log in “Analyze a recording from an OBS log” on the Analyzer tab, where you pick the recordings")
+        b.clicked.connect(self.send_log_to_analyzer)
+        row.addWidget(b)
+        for text, fn in (("Open log file", self._open_sel_log),
+                         ("Logs folder", lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(obs_log.default_log_dir())))):
+            b = QPushButton(text)
+            b.clicked.connect(fn)
+            row.addWidget(b)
+        row.addStretch(1)
+        ll.addLayout(row)
+        root.addWidget(lc, 1)
+
         rc = card()
         rl = QVBoxLayout(rc)
         rl.setContentsMargins(18, 14, 18, 14)
-        rl.addWidget(label("Saved reports", "h2"))
-        rl.addWidget(label("Every analysis is kept here until you delete it. Double-click to open.", "muted", True))
-        self.rep_list = QListWidget()
-        self.rep_list.itemDoubleClicked.connect(lambda it: self.open_report_link(it.data(Qt.UserRole)))
+        rl.setSpacing(8)
+        rl.addWidget(label("Analyzed reports", "h2"))
+        rl.addWidget(label("Every report this app has made, newest first. Kept until you delete it. Double-click to open it on the website.",
+                           "muted", True))
+        self.rep_list = QTreeWidget()
+        self.rep_list.setHeaderLabels(["Analyzed", "Video", "Result", "From OBS log"])
+        self.rep_list.setRootIsDecorated(False)
+        for k in range(3):
+            self.rep_list.header().setSectionResizeMode(k, QHeaderView.ResizeToContents)
+        self.rep_list.header().setSectionResizeMode(3, QHeaderView.Stretch)
+        self.rep_list.itemDoubleClicked.connect(lambda it, *_: self.open_report_link(it.data(0, Qt.UserRole)))
         self.rep_list.setMinimumHeight(110)
         rl.addWidget(self.rep_list, 1)
         row = QHBoxLayout()
@@ -2199,11 +2502,100 @@ class Main(QMainWindow):
         rl.addLayout(row)
         root.addWidget(rc, 1)
 
+        self._logs_timer = QTimer(self)
+        self._logs_timer.timeout.connect(lambda: self.refresh_obs_logs() if self.tabs.currentIndex() == 2 else None)
+        self._logs_timer.start(5000)
         return w
 
     def _sel_report(self):
         it = self.rep_list.currentItem()
-        return it.data(Qt.UserRole) if it else None
+        return it.data(0, Qt.UserRole) if it else None
+
+    def _sel_log(self):
+        it = self.obslog_tree.currentItem()
+        return it.data(0, Qt.UserRole) if it else None
+
+    def _open_sel_log(self):
+        p = self._sel_log()
+        if p:
+            QDesktopServices.openUrl(QUrl.fromLocalFile(p))
+        else:
+            QMessageBox.information(self, APP_NAME, "Click a log in the list first.")
+
+    def refresh_obs_logs(self, force=False):
+        """List OBS's logs in the background. Each log is only skimmed (a text search, not a full read), and only
+        again after OBS writes to it, so this stays well under a second even with hundreds of logs."""
+        if getattr(self, "_obslogs_busy", False):
+            return
+        self._obslogs_busy = True
+        if force:
+            self.logs_status.setText("Refreshing…")
+
+        def go():
+            t0 = time.perf_counter()
+            rows = []
+            try:
+                for lp in self._all_log_paths():
+                    info = quick_log_info(lp)
+                    if info:
+                        rows.append(info)
+            except Exception:
+                traceback.print_exc()
+            rows.sort(key=lambda r: r["written"], reverse=True)
+            self._bridge.logs.emit((rows, time.perf_counter() - t0))
+        threading.Thread(target=go, daemon=True).start()
+
+    def _show_obs_logs(self, payload):
+        rows, secs = payload
+        self._obslogs_busy = False
+        sig = [(r["path"], r["written"], r["recs"]) for r in rows]
+        analyzed = self._analyzed_by_log()
+        sig.append(tuple(sorted(analyzed.items())))
+        if sig != getattr(self, "_obslogs_sig", None):
+            self._obslogs_sig = sig
+            cur = self._sel_log()
+            self.obslog_tree.clear()
+            for r in rows:
+                recs = f"{r['recs']}" + (" (recording now)" if r["open"] else "")
+                done = analyzed.get(os.path.basename(r["path"]).lower())
+                it = QTreeWidgetItem([r["opened"].strftime("%b %d, %Y  %I:%M %p") if r["opened"] else "—",
+                                      r["written"].strftime("%b %d, %I:%M %p"), recs,
+                                      done.strftime("Yes, %b %d %I:%M %p") if done else "Not yet", r["name"]])
+                it.setData(0, Qt.UserRole, r["path"])
+                it.setToolTip(4, r["path"])
+                if not r["recs"]:
+                    for k in range(5):
+                        it.setForeground(k, QColor("#7d808a"))
+                self.obslog_tree.addTopLevelItem(it)
+                if r["path"] == cur:
+                    self.obslog_tree.setCurrentItem(it)
+            if not rows:
+                self.obslog_tree.addTopLevelItem(QTreeWidgetItem(["No OBS logs found", "", "", "", obs_log.default_log_dir()]))
+        self.logs_status.setText(f"{len(rows)} log(s) · checked {datetime.now():%I:%M:%S %p} in {secs:.2f} s")
+
+    def _analyzed_by_log(self):
+        """OBS log file name -> when it was last analyzed (from the saved reports)."""
+        out = {}
+        for p, meta, when in getattr(self, "_reports_cache", []):
+            lg = (meta.get("log") or "").lower()
+            if lg and (lg not in out or when > out[lg]):
+                out[lg] = when
+        return out
+
+    def send_log_to_analyzer(self):
+        p = self._sel_log()
+        if not p:
+            QMessageBox.information(self, APP_NAME, "Click a log in the list first.")
+            return
+        if self.log_combo.findData(p) < 0:
+            self._add_log(p)
+        self.log_combo.setCurrentIndex(self.log_combo.findData(p))
+        self.log_pick_note.setText(f"Opened {os.path.basename(p)} from the OBS Reports tab. Tick the recordings to check, then click Analyze selected.")
+        self.log_pick_note.setStyleSheet("color:#3ecf8e")
+        self.log_pick_note.setVisible(True)
+        QTimer.singleShot(15000, lambda: self.log_pick_note.setVisible(False))
+        self.tabs.setCurrentIndex(1)
+        QTimer.singleShot(50, lambda: self.an_scroll.verticalScrollBar().setValue(self.log_card.y() - 10))
 
     def refresh_logs(self):
         cur = self.log_combo.currentData()
@@ -2252,7 +2644,7 @@ class Main(QMainWindow):
         if not p:
             return
         try:
-            self.parsed_log = obs_log.parse(p)
+            self.parsed_log = self._parsed(p)
         except Exception as e:
             self.rec_tree.addTopLevelItem(QTreeWidgetItem([f"Could not read log: {e}"]))
             return
@@ -2387,14 +2779,6 @@ class Main(QMainWindow):
         self.tabs.setCurrentIndex(1)
         self._start_worker(p, dict(self.video_overrides), self.sess_combo.currentData(), self.cb_deep.isChecked(), sel)
 
-    def analyze_video_only(self):
-        if self.worker:
-            return
-        p, _ = QFileDialog.getOpenFileName(self, "Choose a recording", "", "Video (*.mkv *.mp4 *.mov *.flv *.ts *.m4v);;All files (*)")
-        if p:
-            self.tabs.setCurrentIndex(1)
-            self._start_worker(None, {0: p}, None, self.cb_deep.isChecked(), None)
-
     def _start_worker(self, log, vids, mon, deep, sel):
         ctx = getattr(self, "_est_ctx", None)
         if not ctx or ctx.get("deep") != deep:
@@ -2412,7 +2796,9 @@ class Main(QMainWindow):
         self.worker.failed.connect(self._failed)
         for b in (self.an_btn, self.an_sel_btn, self.vid_btn):
             b.setEnabled(False)
-        self.other_busy.setVisible(True)
+        for n in self.busy_notes:
+            n.setVisible(True)
+        self._run_log = log
         self.an_scroll.verticalScrollBar().setValue(0)      # the progress is at the top
         self.cancel_btn.setEnabled(True)
         self.prog.setValue(0)
@@ -2454,9 +2840,12 @@ class Main(QMainWindow):
 
     def _finish(self):
         self.worker = None
-        for b in (self.an_btn, self.an_sel_btn, self.vid_btn):
+        for b in (self.an_btn, self.an_sel_btn):
             b.setEnabled(True)
-        self.other_busy.setVisible(False)
+        m = self._vid_choice
+        self.vid_btn.setEnabled(bool(m) and not m.get("pending"))
+        for n in self.busy_notes:
+            n.setVisible(False)
         self.cancel_btn.setEnabled(False)
         self.prog.setVisible(False)
         QTimer.singleShot(0, self.refresh_latest)
@@ -2487,7 +2876,8 @@ class Main(QMainWindow):
             traceback.print_exc()
         try:
             with open(self._link_file(path), "w", encoding="utf-8") as f:
-                json.dump({"link": link, "title": title, "file": fname, "sev": sev}, f)
+                json.dump({"link": link, "title": title, "file": fname, "sev": sev,
+                           "log": os.path.basename(getattr(self, "_run_log", None) or "")}, f)
         except OSError:
             pass
         sev_col = {"critical": "#ff5d5d", "warning": "#f5b748", "info": "#5fa8ff", "good": "#3ecf8e"}
@@ -2501,6 +2891,7 @@ class Main(QMainWindow):
         self.settings["last_report"] = lr
         save_settings(self.settings)
         self._show_result(lr)
+        QTimer.singleShot(100, lambda: self.an_scroll.ensureWidgetVisible(self.last_card, 0, 40))
         self.prog_lbl.setText("Done. Click Open report to see the full report with the timeline and the likely cause of each problem.")
         self.refresh_reports()
         self.refresh_latest()
@@ -2519,25 +2910,35 @@ class Main(QMainWindow):
 
     def refresh_reports(self):
         self.rep_list.clear()
-        if not os.path.isdir(REPORTS):
-            return
-        files = sorted((f for f in os.listdir(REPORTS) if f.endswith(".html") and not f.startswith("_")), reverse=True)
-        for f in files:
-            p = os.path.join(REPORTS, f)
-            try:
-                when = datetime.fromtimestamp(os.path.getmtime(p)).strftime("%b %d, %Y  %I:%M %p")
-            except OSError:
-                when = ""
-            meta = self._report_meta(p)
-            title = " — ".join(x for x in (meta.get("file"), meta.get("title")) if x) or "Older report"
-            it = QListWidgetItem(f"{when}    {title}" + ("" if meta.get("link") else "    (saved copy only)"))
-            it.setData(Qt.UserRole, p)
-            self.rep_list.addItem(it)
+        rows = []
+        if os.path.isdir(REPORTS):
+            for f in sorted((f for f in os.listdir(REPORTS) if f.endswith(".html") and not f.startswith("_")), reverse=True):
+                p = os.path.join(REPORTS, f)
+                try:
+                    when = datetime.fromtimestamp(os.path.getmtime(p))
+                except OSError:
+                    continue
+                rows.append((p, self._report_meta(p), when))
+        rows.sort(key=lambda r: r[2], reverse=True)
+        self._reports_cache = rows
+        for p, meta, when in rows:
+            it = QTreeWidgetItem([when.strftime("%b %d, %Y  %I:%M %p"), meta.get("file") or "—",
+                                  (meta.get("title") or "Older report") + ("" if meta.get("link") else "  (saved copy only)"),
+                                  meta.get("log") or ("—" if meta else "not recorded (older report)")])
+            it.setData(0, Qt.UserRole, p)
+            col = {"critical": "#ff5d5d", "warning": "#f5b748", "good": "#3ecf8e"}.get(meta.get("sev"))
+            if col:
+                it.setForeground(2, QColor(col))
+            self.rep_list.addTopLevelItem(it)
+        if not rows:
+            self.rep_list.addTopLevelItem(QTreeWidgetItem(["No reports yet", "", "", ""]))
+        if hasattr(self, "obslog_tree"):
+            self.refresh_obs_logs()
 
     def _del_report(self):
         it = self.rep_list.currentItem()
-        if it and QMessageBox.question(self, APP_NAME, f"Delete “{it.text()}”?") == QMessageBox.Yes:
-            p = it.data(Qt.UserRole)
+        p = it.data(0, Qt.UserRole) if it else None
+        if p and QMessageBox.question(self, APP_NAME, f"Delete the report from {it.text(0)} ({it.text(1)})?") == QMessageBox.Yes:
             for f in (p, self._link_file(p)):
                 try:
                     os.remove(f)
@@ -2547,7 +2948,7 @@ class Main(QMainWindow):
                 self.settings.pop("last_report", None)
                 save_settings(self.settings)
                 self.res_title.setStyleSheet("")
-                self.res_title.setText("No report yet. Click “Analyze my last recording” after you record something.")
+                self.res_title.setText(NO_REPORT)
                 for b in (self.summary, self.res_open, self.res_copy, self.res_local, self.res_hint):
                     b.setVisible(False)
             self.refresh_reports()
@@ -2575,14 +2976,22 @@ About 25 seconds in, it opens the file to confirm the resolution, frame rate, co
 When something goes wrong it posts a message with the time, the position in the video, the likely cause, and what to do. You also get a Windows pop-up, so you don't have to look at the app.
 Some messages have a <b>Pause recording</b> button. Use it, fix the setting, then click <b>Resume</b>.</p>
 <h3>After you record</h3>
-<p>The <b>Analyzer</b> tab always shows your latest recording. If automatic analysis is on (Settings → Behavior, or the last step of the guided setup), the app analyzes it
-a few minutes after you stop recording and shows a Windows pop-up. Otherwise click <b>Analyze my last recording</b>. Nothing opens by itself.</p>
-<p>The result stays on the Analyzer tab, even after you close and reopen the app, until you analyze again. Click <b>Open report</b> to see the full report in your browser:
+<p>The <b>Analyzer</b> tab has four sections:</p>
+<ol>
+<li><b>Analyze your last recording</b> finds your newest recording by itself and shows its details. It's only analyzed when you click
+<b>Analyze my last recording</b>, unless you turned on automatic analysis (Settings → Behavior, or the last step of the guided setup).</li>
+<li><b>Analyze a recording from an OBS log</b>: pick any OBS log, tick the recordings to check, and click <b>Analyze selected</b>.</li>
+<li><b>Analyze a different video</b>: browse to any video. If it's listed in one of your OBS logs, it gets the same full analysis as your last recording.
+Otherwise the file is checked by itself.</li>
+<li><b>Last report</b> shows the result. It stays there, even after you close and reopen the app, until you analyze again.</li>
+</ol>
+<p>Only one analysis runs at a time, so the other buttons are grayed out until it finishes (or you click Cancel). The progress always shows in the first section.
+If the app can't find the file or log, it asks for it with a <b>Locate file</b> or <b>Browse for log</b> button.</p>
+<p>Click <b>Open report</b> to see the full report in your browser:
 a timeline with timestamps, what the PC was doing, the likely cause of each problem, and <b>How this recording was checked</b>: every step the analysis took, in order, with the time, what it checked and what it found. The report is stored inside the link itself, so nothing is uploaded to a server,
 and <b>Copy link</b> lets you open it on your phone or send it to someone. Folder names are left out. <b>Open saved copy</b> opens the copy saved on this PC (works offline).</p>
-<p>Lower on the Analyzer tab, <b>Analyze a different recording</b> checks an older recording from any OBS log, or a video file by itself.
-Only one analysis runs at a time, so these buttons are grayed out until the current one finishes (or you click Cancel). The <b>OBS Reports</b> tab lists every saved report.
-If the app can't find the file or log, it asks for it with a <b>Locate file</b> or <b>Browse for log</b> button.</p>
+<p>The <b>OBS Reports</b> tab only lists files; it doesn't analyze anything. <b>OBS log files</b> lists every log OBS has written, with how many recordings each has and whether it was analyzed.
+Select one and click <b>Analyze on the Analyzer tab</b> to open it there. <b>Analyzed reports</b> lists every report this app made, to open on the website again.</p>
 <h3>Updates</h3>
 <p>The app checks for a new version when it opens (you can turn this off in Settings → Updates, or click <b>Check for updates now</b>). If one is available, it shows what's new and asks first.
 Click <b>Update now</b> and it downloads the installer, closes, updates and opens again by itself. Your settings and reports are kept.</p>
