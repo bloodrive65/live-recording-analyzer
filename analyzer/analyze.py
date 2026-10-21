@@ -68,6 +68,7 @@ class Result:
     samples: list = field(default_factory=list)
     marks: list = field(default_factory=list)
     notes: list = field(default_factory=list)
+    steps: list = field(default_factory=list)      # every step the analysis took, in order (see steps.py)
 
 
 def fmt_t(sec: Optional[float]) -> str:
@@ -257,20 +258,36 @@ def run(log_path: Optional[str], video_paths: dict | None = None, monitor_path: 
         deep: bool = False, progress: Optional[Callable[[str, float], None]] = None,
         cancel: Optional[Callable[[], bool]] = None, recordings_filter: Optional[list] = None) -> Result:
     """video_paths: {recording index -> file path} (paths may be overridden if files moved)."""
+    from .steps import StepLog
     say = progress or (lambda m, p: None)
     findings: list[Finding] = []
     incidents: list[Incident] = []
     notes = []
+    st = StepLog()
+    CHK_LOG = ("OBS version, your encoder and its settings, output resolution and frame rate, color format, color space and range, "
+               "scenes and sources, when each recording started, paused and stopped, skipped and lagged frame counts, and OBS warnings")
+    CHK_MON = ("This app's once-a-second PC readings while you recorded: GPU and video-encoder load, CPU, RAM, recording-drive activity "
+               "and speed, temperatures, the busiest programs, and OBS's own frame counters")
 
     log = None
     if log_path:
         say("Reading OBS log…", 0.01)
+        st.begin("Read the OBS log", CHK_LOG)
         log = obslog.parse(log_path)
+        span = f"; the log covers {log.first_ts:%b %d %I:%M %p} to {log.last_ts:%I:%M %p}" if log.first_ts and log.last_ts else ""
+        st.done(f"{os.path.basename(log_path)}: OBS {log.obs_version or 'version unknown'}, {len(log.recordings)} recording(s){span}.")
+    else:
+        st.skip("Read the OBS log", CHK_LOG, "No OBS log was used (video file only), so OBS settings and skip counts weren't checked.")
 
     samples, marks, meta = [], [], {}
     if monitor_path and os.path.isfile(monitor_path):
         say("Loading monitor data…", 0.03)
+        st.begin("Load this app's watching data", CHK_MON)
         meta, samples, marks = load_session(monitor_path)
+        st.done(f"{len(samples):,} readings" + (f" from {samples[0]['_dt']:%I:%M:%S %p} to {samples[-1]['_dt']:%I:%M:%S %p}." if samples else "."))
+    else:
+        st.skip("Load this app's watching data", CHK_MON,
+                "This app wasn't watching during this recording, so the report can't say what the PC was doing at each problem.")
 
     recs = []
     if log:
@@ -290,7 +307,10 @@ def run(log_path: Optional[str], video_paths: dict | None = None, monitor_path: 
             recs.append((idx, r))
 
     # ---- system-wide findings from the log
+    CHK_SYS = "Whether OBS runs as administrator, an unclean shutdown, Windows HDR vs. screen captures, browser source errors, and how long OBS was open"
+    n0 = len(findings)
     if log:
+        st.begin("Check OBS-wide settings", CHK_SYS)
         sysf = log.system
         if sysf.get("admin", "").lower() == "false":
             findings.append(Finding("warning", "System", "OBS is not running as administrator",
@@ -335,7 +355,16 @@ def run(log_path: Optional[str], video_paths: dict | None = None, monitor_path: 
                                     "Long OBS uptimes with browser sources can slowly build up memory/GPU use.",
                                     "Restart OBS before long recording sessions."))
 
+    if log:
+        k = len(findings) - n0
+        st.done(f"{k} thing(s) to report." if k else "Nothing to report.", "found" if k else "ok")
+    else:
+        st.skip("Check OBS-wide settings", CHK_SYS, "Needs the OBS log.")
+
     # ---- per recording
+    CHK_CMP = ("OBS settings against the file (resolution, frame rate, codec, bit depth, color format, range and space), capture devices against "
+               "OBS's frame rate, encoder settings for the resolution, skipped and lagged frames, pauses, and the recording drive")
+    CHK_TL = "Matches each skip, gap and OBS warning with what the PC was doing at that second, to find the likely cause"
     total_steps = max(len(recs), 1)
     for n, (idx, r) in enumerate(recs):
         o = r.output
@@ -343,25 +372,47 @@ def run(log_path: Optional[str], video_paths: dict | None = None, monitor_path: 
         path = (video_paths or {}).get(idx) or o.path
         if path:
             path = path.replace("/", os.sep) if sys.platform == "win32" else path
+        st.begin("Find the recording file", "Looks for the video file where OBS saved it (or where you pointed the app to it)", r.label)
         if path and os.path.isfile(path):
+            try:
+                gb = os.path.getsize(path) / 1073741824
+            except OSError:
+                gb = 0
+            st.done(f"Found {os.path.basename(path)} ({gb:.2f} GB).")
+
             def sub(msg, p, _n=n):
                 say(f"{r.label}: {msg}", 0.05 + 0.6 * (_n + p) / total_steps)
-            r.video = video_probe.probe(path, progress=sub, deep=deep, cancel=cancel)
+            r.video = video_probe.probe(path, progress=sub, deep=deep, cancel=cancel, steps=st, rec=r.label)
         elif path:
+            st.done(f"Not found at {os.path.basename(path)}, so only the OBS log was checked for this recording.", "failed")
             notes.append(f"{r.label}: file not found at {path} — only the OBS log was analyzed for it. Use “Locate file” if you moved it.")
+        else:
+            st.done("OBS didn't log a file name for this recording.", "skipped")
         if cancel and cancel():
             break
 
         stop = o.stop or (log.last_ts if log else None) or o.start
         r.samples = _window(samples, o.start - timedelta(seconds=2), stop + timedelta(seconds=2)) if samples else []
         letter = r.drive.get("letter", "")
+        st.begin("Compare settings, file and frame counts", CHK_CMP, r.label)
+        n0 = len(findings)
         _recording_findings(log, r, findings)
+        k = len(findings) - n0
+        st.done(f"{k} finding(s)." if k else "Everything matched.", "found" if k else "ok")
+        st.begin("Build the timeline of problems", CHK_TL, r.label)
+        n0 = len(incidents)
         _recording_incidents(log, r, incidents, letter)
+        k = len(incidents) - n0
+        st.done((f"{k} moment(s) on the timeline" + (", each with what the PC was doing." if r.samples else ".")) if k else "No problem moments.",
+                "found" if k else "ok")
 
     # ---- Windows event log
     wev = []
+    CHK_WEV = "Graphics driver resets and timeouts, disk and USB errors, and app crashes, from 2 minutes before to 2 minutes after recording"
     if recs:
         say("Checking Windows event log…", 0.7)
+        st.begin("Check the Windows event log", CHK_WEV)
+        n0 = len(incidents)
         try:
             t0 = min(r.output.start for _, r in recs) - timedelta(minutes=2)
             t1 = max((r.output.stop or r.output.start) for _, r in recs) + timedelta(minutes=2)
@@ -379,6 +430,9 @@ def run(log_path: Optional[str], video_paths: dict | None = None, monitor_path: 
                                               causes=[(f"{e['provider']} event {e['id']}: {e['message'][:160]}", "medium")],
                                               recording=r.label))
                     break
+        k = len(incidents) - n0
+        st.done(f"{len(wev)} event(s) read; {k} happened during a recording and are on the timeline." if wev else "No relevant Windows events.",
+                "found" if k else "ok")
 
     # ---- monitor-only session (no OBS log)
     if not recs and samples:
@@ -396,9 +450,12 @@ def run(log_path: Optional[str], video_paths: dict | None = None, monitor_path: 
     findings = _merge_findings(findings, len(recs))
     findings.sort(key=lambda f: SEV_ORDER.get(f.severity, 9))
     say("Building report…", 0.95)
+    st.begin("Write the report", "Combines repeated findings, sorts them by how serious they are, and adds the fixes")
+    cnt = {k: sum(1 for f in findings if f.severity == k) for k in ("critical", "warning", "info")}
+    st.done(f"{cnt['critical']} serious, {cnt['warning']} warning(s), {cnt['info']} note(s); {len(incidents)} timeline moment(s).")
     res = Result(created=datetime.now(), log=log, recordings=[r for _, r in recs], findings=findings,
                  incidents=incidents, winevents=wev, monitor_path=monitor_path or "", monitor_meta=meta,
-                 samples=samples, marks=marks, notes=notes)
+                 samples=samples, marks=marks, notes=notes, steps=st.items)
     return res
 
 

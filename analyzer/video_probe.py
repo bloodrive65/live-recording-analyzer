@@ -107,8 +107,17 @@ def _ratio(s: str) -> float:
 
 
 def probe(path: str, progress: Optional[Callable[[str, float], None]] = None,
-          deep: bool = False, cancel: Optional[Callable[[], bool]] = None) -> VideoReport:
+          deep: bool = False, cancel: Optional[Callable[[], bool]] = None, steps=None, rec: str = "") -> VideoReport:
     rep = VideoReport(path=path)
+    if steps is None:
+        from .steps import StepLog
+        steps = StepLog()
+    CHK_META = ("Container, length, video codec and profile, resolution, frame rate, color format, bit depth, "
+                "color range and color space tags, and audio tracks")
+    CHK_TS = ("Reads the timestamp of every video frame to find gaps (missing frames), timestamps that go backwards, "
+              "variable frame rate, and the frame rate over time")
+    CHK_AUDIO = "Gaps in the audio, and whether audio and video start and end together"
+    CHK_DEEP = "Decodes every frame and compares it with the one before, to find repeated or frozen frames"
     fp = ffprobe_path()
     if not fp:
         rep.ok, rep.error = False, "ffprobe was not found."
@@ -120,6 +129,7 @@ def probe(path: str, progress: Optional[Callable[[str, float], None]] = None,
     say = progress or (lambda m, p: None)
 
     say("Reading recording details…", 0.02)
+    steps.begin("Read the file's properties (ffprobe)", CHK_META, rec)
     r = _run([fp, "-v", "error", "-show_format", "-show_streams", "-of", "json", path])
     try:
         info = json.loads(r.stdout or "{}")
@@ -127,6 +137,7 @@ def probe(path: str, progress: Optional[Callable[[str, float], None]] = None,
         info = {}
     if not info.get("streams"):
         rep.ok, rep.error = False, "ffprobe could not read this file. " + (r.stderr or "")[:300]
+        steps.done("The file couldn't be read, so the file checks were skipped.", "failed")
         return rep
     fmt = info.get("format", {})
     rep.container = fmt.get("format_long_name") or fmt.get("format_name", "")
@@ -136,6 +147,7 @@ def probe(path: str, progress: Optional[Callable[[str, float], None]] = None,
     astreams = [s for s in info["streams"] if s.get("codec_type") == "audio"]
     if not vstreams:
         rep.ok, rep.error = False, "No video stream in file."
+        steps.done("No video track in the file.", "failed")
         return rep
     v = vstreams[0]
     rep.video = {
@@ -164,9 +176,16 @@ def probe(path: str, progress: Optional[Callable[[str, float], None]] = None,
     if rep.nominal_fps > 240 or rep.nominal_fps <= 0:  # mkv sometimes reports 1000/1 timebase
         rep.nominal_fps = _ratio(v.get("avg_frame_rate") or "0/1")
     rep.expected_frames = int(round(rep.duration * rep.nominal_fps)) if rep.nominal_fps else 0
+    vv = rep.video
+    steps.done(" · ".join(str(x) for x in (
+        f"{vv.get('width')}x{vv.get('height')}", f"{rep.nominal_fps:.2f} fps",
+        " ".join(str(x) for x in (vv.get("codec"), vv.get("profile")) if x), vv.get("pix_fmt"),
+        f"color range {vv.get('color_range')}", f"color space {vv.get('color_space')}",
+        f"{len(rep.audio)} audio track(s)", f"length {int(rep.duration // 3600)}:{int(rep.duration % 3600 // 60):02d}:{int(rep.duration % 60):02d}") if x))
 
     # ---- video packet timestamps -------------------------------------------------
     say("Checking every frame's timestamp…", 0.05)
+    steps.begin("Check every video frame's timestamp", CHK_TS, rec)
     cmd = [fp, "-v", "error", "-select_streams", str(v.get("index", 0)), "-show_entries",
            "packet=pts_time,dts_time,size,flags", "-of", "csv=p=0", path]
     pts, sizes, flags = [], [], []
@@ -200,6 +219,7 @@ def probe(path: str, progress: Optional[Callable[[str, float], None]] = None,
             if cancel and cancel():
                 proc.kill()
                 rep.ok, rep.error = False, "Cancelled"
+                steps.done("Cancelled.", "failed")
                 return rep
     proc.wait()
     pts.sort()
@@ -237,9 +257,21 @@ def probe(path: str, progress: Optional[Callable[[str, float], None]] = None,
                 med = statistics.median(non_key)
                 rep.tiny_packets = sum(1 for s in non_key if s < med * 0.02)
 
+    bits = [f"{rep.frame_count:,} frames read (expected about {rep.expected_frames:,})"]
+    bits.append(f"{len(rep.gaps)} gap(s), {rep.gap_frames_total:,} missing frame(s)" if rep.gaps else "no gaps")
+    if rep.measured_fps:
+        bits.append(f"measured {rep.measured_fps:.2f} fps")
+    if rep.backwards_ts:
+        bits.append(f"{rep.backwards_ts} timestamp(s) went backwards")
+    bits.append("variable frame rate" if rep.vfr else "constant frame rate")
+    steps.done("; ".join(bits) + ".", "found" if (rep.gaps or rep.backwards_ts) else "ok")
+
     # ---- audio --------------------------------------------------------------------
+    if not astreams:
+        steps.skip("Check audio continuity", CHK_AUDIO, "The file has no audio track.", rec)
     if astreams:
         say("Checking audio continuity…", 0.47)
+        steps.begin("Check audio continuity", CHK_AUDIO, rec)
         a = astreams[0]
         r = _run([fp, "-v", "error", "-select_streams", str(a.get("index")), "-show_entries",
                   "packet=pts_time,duration_time", "-of", "csv=p=0", path])
@@ -260,10 +292,23 @@ def probe(path: str, progress: Optional[Callable[[str, float], None]] = None,
             v_end = pts[-1] + (1.0 / rep.nominal_fps if rep.nominal_fps else 0)
             rep.av_drift_ms = round((a_end - v_end) * 1000, 1)
             rep.av_start_offset_ms = round((apts[0][0] - pts[0]) * 1000, 1)
+        if rep.av_drift_ms is not None and len(apts) > 2 and pts:
+            steps.done(f"{len(rep.audio_gaps)} audio gap(s); audio ends {abs(rep.av_drift_ms):.0f} ms "
+                       f"{'after' if rep.av_drift_ms >= 0 else 'before'} the video.", "found" if rep.audio_gaps else "ok")
+        else:
+            steps.done("Not enough audio to compare.", "skipped")
 
     # ---- deep scan --------------------------------------------------------------------
     if deep:
+        steps.begin("Deep scan for repeated and frozen frames", CHK_DEEP, rec)
         deep_scan(rep, progress=say, cancel=cancel)
+        if rep.deep_scanned:
+            steps.done(f"{rep.dup_total:,} repeated frame(s), including {len(rep.dup_runs)} longer freeze(s)." if rep.dup_total else "No repeated or frozen frames.",
+                       "found" if rep.dup_total else "ok")
+        else:
+            steps.done("The deep scan didn't finish (cancelled or ffmpeg couldn't read the file).", "failed")
+    else:
+        steps.skip("Deep scan for repeated and frozen frames", CHK_DEEP, "Not run. Tick Deep scan before analyzing to include it.", rec)
     say("Recording check finished", 1.0)
     return rep
 

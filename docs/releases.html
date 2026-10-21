@@ -17,11 +17,19 @@
 <button class="menu-btn" aria-label="Menu" aria-expanded="false" aria-controls="nav">&#9776;</button>
 <nav class="nav" id="nav" aria-label="Main"><a href="index.html">Home</a><a href="getting-started.html">Getting started</a><a href="using-the-app.html">Using the app</a><a href="problems-explained.html">Problems explained</a><a href="faq.html">FAQ & fixes</a><a href="releases.html" aria-current=page>Releases</a></nav>
 </div></header>
-<main id="main"><div class="wrap page"><aside class="toc" aria-label="On this page"><b>ON THIS PAGE</b><a href="#v142">1.4.2</a><a href="#v141">1.4.1</a><a href="#v140">1.4.0</a><a href="#v132">1.3.2</a><a href="#v131">1.3.1</a><a href="#v130">1.3.0</a><a href="#v121">1.2.1</a><a href="#v120">1.2.0</a><a href="#v110">1.1.0</a><a href="#which">Which file?</a></aside><article class="doc">
+<main id="main"><div class="wrap page"><aside class="toc" aria-label="On this page"><b>ON THIS PAGE</b><a href="#v143">1.4.3</a><a href="#v142">1.4.2</a><a href="#v141">1.4.1</a><a href="#v140">1.4.0</a><a href="#v132">1.3.2</a><a href="#v131">1.3.1</a><a href="#v130">1.3.0</a><a href="#v121">1.2.1</a><a href="#v120">1.2.0</a><a href="#v110">1.1.0</a><a href="#which">Which file?</a></aside><article class="doc">
 <h1>Releases</h1>
 <p class="intro">Always get the newest version from <a href="https://github.com/bloodrive65/live-recording-analyzer/releases/latest">the latest release on GitHub</a>. Installers are built automatically from the public source code.</p>
 
-<div class="rel" id="v142"><header><h2>1.4.2</h2><span class="pill" style="color:var(--ok)">LATEST</span><span class="date">October 2026</span></header>
+<div class="rel" id="v143"><header><h2>1.4.3</h2><span class="pill" style="color:var(--ok)">LATEST</span><span class="date">October 2026</span></header>
+<ul>
+<li><b>New:</b> every report has a <b>How this recording was checked</b> section that lists each step the analysis took, in order, with the time it started, what it checked, what it found and how long it took.</li>
+<li><b>Moved:</b> analyzing an older recording from an OBS log, and checking a video file only, are now under <b>Analyze a different recording</b> on the Analyzer tab. The OBS Reports tab now only lists saved reports.</li>
+<li><b>Clearer:</b> while an analysis runs, those buttons are grayed out with a note explaining why (only one analysis runs at a time) and that you can click Cancel to stop it.</li>
+</ul>
+<div class="dl"><a class="btn primary" href="https://github.com/bloodrive65/live-recording-analyzer/releases/tag/v1.4.3">Download 1.4.3</a></div></div>
+
+<div class="rel" id="v142"><header><h2>1.4.2</h2><span class="date">October 2026</span></header>
 <ul>
 <li><b>Fixed:</b> recordings were analyzed even when you didn't ask. Automatic analysis is now off unless you turn it on in Settings → Behavior or in the guided setup.</li>
 <li><b>Fixed:</b> two copies of the app could run at once, which caused double notifications and a second window when clicking one. Now only one copy runs; opening the app again or clicking a notification brings up the open window.</li>

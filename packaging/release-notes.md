@@ -1,9 +1,9 @@
-## What's new in 1.4.2
+## What's new in 1.4.3
 
-- **Fixed: recordings were analyzed even when you didn't ask.** Automatic analysis is now off unless you turn it on (Settings → Behavior, or the last step of the guided setup). When a recording stops, the Analyzer tab shows it, and you click **Analyze my last recording** when you want a report. If you'd like it automatic, turn it on again once.
-- **Fixed: two copies of the app could run at once.** That caused double notifications, and clicking a notification opened a second window. Now only one copy runs. Opening the app again, or clicking a notification, brings up the window that's already open.
-- **Bigger progress bar** with broader, slower waves and the percentage shown inside.
+- **New: "How this recording was checked" in every report.** Click **Open report** and use the **How it was checked** button (or scroll down). It lists every step the analysis took, in the order it ran: the time each step started, which recording it was for, what it checked, what it found, and how long it took.
+- **Moved: "Analyze a different recording" is now on the Analyzer tab.** Analyzing an older recording from an OBS log and checking a video file only now sit together below Last report. The OBS Reports tab now lists only saved reports.
+- **Clearer: why the buttons are grayed out.** Only one analysis runs at a time. While one is running, those buttons are grayed out and a note explains why. They work again when it finishes, or click **Cancel** to stop it.
 
-Includes everything from 1.4.1: the updated desktop and taskbar icon.
+Includes everything from 1.4.2.
 
 Update with Settings → Updates → Check for updates now, or download **Live-Recording-Analyzer-Setup-*.exe** below.

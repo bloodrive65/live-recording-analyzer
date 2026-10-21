@@ -23,7 +23,7 @@ h3{font-size:16px;margin:18px 0 8px}.muted{color:var(--muted)}.small{font-size:1
 .verdict{border-radius:12px;padding:16px 18px;margin:16px 0;border:1px solid var(--line);background:var(--panel)}
 .verdict.crit{border-left:5px solid var(--crit)}.verdict.warn{border-left:5px solid var(--warn)}.verdict.good{border-left:5px solid var(--good)}
 .f{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 16px;margin:10px 0}
-.where{margin:8px 0 10px;padding:8px 10px;border-left:3px solid #5fa8ff;border-radius:6px;background:rgba(95,168,255,.07)}.where .wh{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:#8fc1ff;margin-bottom:4px}.where dl{display:grid;grid-template-columns:max-content 1fr;gap:3px 14px;margin:0}.where dt{color:#9a9ca5}.where dd{margin:0}
+.steps{padding-left:26px}.steps li{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 14px;margin:8px 0}.steps .sh{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.steps .small{margin-top:3px}.where{margin:8px 0 10px;padding:8px 10px;border-left:3px solid #5fa8ff;border-radius:6px;background:rgba(95,168,255,.07)}.where .wh{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:#8fc1ff;margin-bottom:4px}.where dl{display:grid;grid-template-columns:max-content 1fr;gap:3px 14px;margin:0}.where dt{color:#9a9ca5}.where dd{margin:0}
 .f summary{cursor:pointer;list-style:none;display:flex;gap:10px;align-items:baseline}.f summary::-webkit-details-marker{display:none}
 .f .t{font-weight:600}.f .rec{margin-left:auto;font-size:12px;color:var(--muted);text-align:right}
 .f .body{margin-top:8px;color:#cfd4dd}.f .body b{color:var(--text)}
@@ -169,6 +169,8 @@ def build(res: Result) -> str:
                  ("Recordings", f"{len(res.recordings)}")):
         out.append(f"<div class='card'><div class='k'>{E(k)}</div><div class='v'>{E(v)}</div></div>")
     out.append("</div>")
+    if getattr(res, "steps", None):
+        out.append("<p class='small'><a href='#steps' style='color:#c9ced8'>See every step the analysis took, in order</a></p>")
     for n in res.notes:
         out.append(f"<div class='note'>{E(n)}</div>")
 
@@ -285,6 +287,27 @@ def build(res: Result) -> str:
             if len(incs) > 600:
                 out.append(f"<tr><td colspan='5' class='muted'>…and {len(incs)-600} more</td></tr>")
             out.append("</table>")
+
+    # every step the analysis took, in order
+    steps = getattr(res, "steps", None) or []
+    if steps:
+        from .steps import secs_text
+        total = sum(float(x.get("secs") or 0) for x in steps)
+        out.append("<h2 id='steps'>How this recording was checked</h2>")
+        out.append(f"<p class='small muted'>Every step the analysis took, in the order it ran. Total time: {secs_text(total)}.</p><ol class='steps'>")
+        lab = {"ok": ("Done", "b-good"), "found": ("Found something", "b-warning"), "skipped": ("Skipped", "b-low"), "failed": ("Couldn't finish", "b-critical")}
+        for x in steps:
+            try:
+                tt = datetime.fromisoformat(x["t"]).strftime("%I:%M:%S %p")
+            except Exception:
+                tt = ""
+            name, cls = lab.get(x.get("status"), ("Done", "b-good"))
+            rec = f" · {E(x['rec'])}" if x.get("rec") else ""
+            out.append(f"<li><div class='sh'><b>{E(x.get('title', ''))}</b><span class='badge {cls}'>{name}</span></div>"
+                       f"<div class='small muted'>{tt}{rec} · took {secs_text(x.get('secs'))}</div>"
+                       f"<div class='small'><span class='muted'>Checked:</span> {E(x.get('checks', ''))}</div>"
+                       f"<div class='small'><span class='muted'>Result:</span> {E(x.get('result', '') or '—')}</div></li>")
+        out.append("</ol>")
 
     # Windows events
     rel = [e for e in res.winevents if e["meaning"]]

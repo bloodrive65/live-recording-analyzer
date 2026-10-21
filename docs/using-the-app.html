@@ -64,21 +64,21 @@
 <li><b>Open report</b> shows the full report in your browser. <b>Copy link</b> copies its link. <b>Open saved copy</b> opens the copy saved on this PC, which works offline.</li>
 </ol>
 <p>The Last report box stays, even after you close and reopen the app, until you analyze again. Nothing opens by itself.</p>
+<p><b>Analyze a different recording</b>, lower on the same tab, is for recordings that aren't the latest one. Only one analysis runs at a time, so its buttons are grayed out until the current one finishes, or you click <b>Cancel</b> at the top.</p>
+<ol class="steps">
+<li><b>From an OBS log:</b> choose an OBS log. OBS writes a new one each time it opens; the newest are listed automatically. They are also in OBS under <span class="path">Help → Log Files → Show Log Files</span>.</li>
+<li>Tick the recordings you want to check. If a file has been moved, double-click its row to point to it. <b>Watching data</b> is picked automatically when the app was watching during that recording. Then click <b>Analyze selected</b>.</li>
+<li><b>A video file only:</b> click <b>Choose a video file</b> to check any video by itself (missing frames, frame rate, color tags, audio). Without an OBS log it can't compare your OBS settings or count the frames OBS skipped.</li>
+</ol>
 
 <h2 id="obsreports">OBS Reports tab</h2>
 <p><b>Saved reports</b> lists every report you've made, newest first. Double-click one to open it, or use <b>Open report</b>, <b>Copy link</b>, <b>Open saved copy</b>, <b>Reports folder</b> or <b>Delete</b>.</p>
-<p><b>Analyze an older recording from an OBS log</b> is for recordings that aren't the latest one:</p>
-<ol class="steps">
-<li>Choose an OBS log. OBS writes a new one each time it opens; the newest are listed automatically. They are also in OBS under <span class="path">Help → Log Files → Show Log Files</span>.</li>
-<li>Tick the recordings you want to check. If a file has been moved, double-click its row to point to it.</li>
-<li><b>Watching data</b> is picked automatically when the app was watching during that recording.</li>
-<li>Click <b>Analyze selected</b>. The result appears on the Analyzer tab. To check a video without a log, use <b>Check a video file only</b>.</li>
-</ol>
 
 <h2 id="report">The report</h2>
 <p>Reports open in your web browser on <a href="report.html">this website’s report page</a>. The whole report is packed into the link, after the “#”. Browsers never send that part to a server, so GitHub never receives your report; the page simply unpacks it in your browser. That means a report link works on any device, including your phone, and anyone you send it to can see it. Folder names are left out. Each report is also saved on your PC as a single HTML file that works offline. Reports contain:</p>
 <ul>
 <li><b>Verdict and key findings</b>, each with why it matters and how to fix it. Most findings also have a <b>Where it comes from on your PC</b> box with the exact OBS menu, the scene and source involved, the current value, and what to change it to.</li>
+<li><b>How this recording was checked:</b> every step the analysis took, in the order it ran, with the time it started, what it checked, what it found and how long it took</li>
 <li><b>Timeline</b> of every incident, with clock time and video position, plus the likely cause based on what the PC was doing at that second</li>
 <li><b>Chart</b> of skipped frames against GPU, encoder, CPU and drive load</li>
 <li><b>Settings check</b> comparing OBS settings with what the file really contains</li>

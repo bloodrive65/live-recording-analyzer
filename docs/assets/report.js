@@ -61,6 +61,14 @@
     return el("div", { class: "rp-chart" }, legend, svg);
   }
 
+  function secs(s) {
+    s = +s || 0;
+    if (s < 1) return "under 1 s";
+    if (s < 60) return Math.round(s) + " s";
+    const m = Math.floor(Math.round(s) / 60), r = Math.round(s) % 60;
+    return m < 60 ? `${m} min ${String(r).padStart(2, "0")} s` : `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, "0")} min`;
+  }
+
   function table(head, rows) {
     return el("div", { class: "rp-tw" }, el("table", null, el("thead", null, el("tr", null, head.map((h) => el("th", { text: h })))), el("tbody", null, rows)));
   }
@@ -82,7 +90,8 @@
     });
     const printBtn = el("button", { class: "btn", type: "button" }, "Print or save as PDF");
     printBtn.addEventListener("click", () => window.print());
-    root.append(el("div", { class: "rp-bar" }, copyBtn, printBtn, el("a", { class: "btn", href: "problems-explained.html" }, "What the problems mean")));
+    root.append(el("div", { class: "rp-bar" }, copyBtn, printBtn, el("a", { class: "btn", href: "problems-explained.html" }, "What the problems mean"),
+      (d.steps || []).length ? el("a", { class: "btn", href: "#steps" }, "How it was checked") : null));
     root.append(el("p", { class: "rp-priv", text: "Private by design: this report is stored inside the link, not on GitHub. Anyone you send the link to can see it. Folder names are left out." }));
 
     const [vc, vt, vb] = d.verdict || ["good", "", ""];
@@ -131,6 +140,20 @@
         if (r.more) rows.push(el("tr", null, el("td", { colspan: 5, class: "muted", text: `…and ${fmt(r.more)} more (see the copy saved in the app).` })));
         root.append(table(["Clock time", "In video", "What happened", "PC at that moment", "Possible reasons"], rows));
       }
+    }
+    if ((d.steps || []).length) {
+      const total = d.steps.reduce((n, x) => n + (+x[5] || 0), 0);
+      root.append(el("h2", { id: "steps", text: "How this recording was checked" }));
+      root.append(el("p", { class: "muted small", text: `Every step the analysis took, in the order it ran. Total time: ${secs(total)}.` }));
+      const lab = { ok: ["Done", "b-good"], found: ["Found something", "b-warning"], skipped: ["Skipped", "b-low"], failed: ["Couldn't finish", "b-critical"] };
+      root.append(el("ol", { class: "rp-steps" }, d.steps.map(([t, title, checks, result, status, sec, rec]) => {
+        const [name, cls] = lab[status] || lab.ok;
+        return el("li", null,
+          el("div", { class: "sh" }, el("b", { text: title }), el("span", { class: "badge " + cls, text: name })),
+          el("div", { class: "muted small", text: [t, rec, "took " + secs(sec)].filter(Boolean).join(" · ") }),
+          el("div", { class: "small" }, el("span", { class: "muted", text: "Checked: " }), checks || ""),
+          el("div", { class: "small" }, el("span", { class: "muted", text: "Result: " }), result || "—"));
+      })));
     }
     if ((d.win || []).length) {
       root.append(el("h2", { text: "Windows events during the recording" }));

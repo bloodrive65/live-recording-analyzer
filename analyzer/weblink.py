@@ -9,6 +9,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+from datetime import datetime
 import zlib
 
 from .analyze import Result, fmt_t
@@ -160,6 +161,13 @@ def to_data(res: Result, version: str = "", compare=None) -> dict:
                           "chart": _chart(r, r.drive.get("letter", ""), incs) if r.stats else None,
                           "inc": inc_rows, "more": max(0, len(incs) - 180),
                           "obs_live": bool((r.stats or {}).get("obs_connected"))})
+    for st in getattr(res, "steps", None) or []:
+        try:
+            t = datetime.fromisoformat(st["t"]).strftime("%I:%M:%S %p")
+        except Exception:
+            t = ""
+        d.setdefault("steps", []).append([t, st.get("title", ""), st.get("checks", ""), st.get("result", ""),
+                                          st.get("status", "ok"), st.get("secs", 0), st.get("rec", "")])
     for e in [e for e in res.winevents if e.get("meaning")][:60]:
         d["win"].append([f"{e['ts']:%I:%M:%S %p}", f"{e['provider']} #{e['id']}", e["meaning"], (e.get("message") or "")[:160]])
     if log:
