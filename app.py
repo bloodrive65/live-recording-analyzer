@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 import queue
 import os
 import sys
@@ -30,7 +31,7 @@ from analyzer import weblink, updater
 
 APP_NAME = "Live Recording Analyzer"
 OLD_NAME = "OBS Session Analyzer"
-VERSION = "1.4.1"
+VERSION = "1.4.2"
 
 
 def resource(name):
@@ -243,7 +244,7 @@ class WaveBar(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setFixedHeight(16)
+        self.setFixedHeight(30)
         self._target = 0.0
         self._shown = 0.0
         self._phase = 0.0
@@ -293,11 +294,11 @@ class WaveBar(QWidget):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
         r = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
-        rad = r.height() / 2
+        rad = min(8.0, r.height() / 2)
         track = QPainterPath()
         track.addRoundedRect(r, rad, rad)
         p.fillPath(track, QColor("#222228"))
-        p.setPen(QColor("#33333b"))
+        p.setPen(QColor("#3a3a43"))
         p.drawPath(track)
         fw = r.width() * self._shown
         if fw > 1:
@@ -308,7 +309,7 @@ class WaveBar(QWidget):
             g.setColorAt(1, QColor(122, 125, 134))
             p.fillRect(fill, g)
             h = r.height()
-            for amp, length, speed, alpha, base in ((0.22, 120.0, 1.0, 90, 0.40), (0.18, 190.0, -0.6, 70, 0.55), (0.14, 80.0, 1.4, 60, 0.28)):
+            for amp, length, speed, alpha, base in ((0.22, 200.0, 1.0, 90, 0.40), (0.18, 320.0, -0.6, 70, 0.55), (0.14, 130.0, 1.4, 60, 0.28)):
                 path = QPainterPath(QPointF(r.left(), r.bottom()))
                 x = r.left()
                 while x <= r.left() + fw + 4:
@@ -322,6 +323,21 @@ class WaveBar(QWidget):
             edge.setColorAt(0, QColor(255, 255, 255, 0))
             edge.setColorAt(1, QColor(255, 255, 255, 150))
             p.fillRect(QRectF(r.left() + max(0, fw - 24), r.top(), min(24, fw), r.height()), edge)
+        p.setClipping(False)
+        if self._target > 0:              # percentage, kept readable over both the fill and the track
+            f = p.font()
+            f.setPointSizeF(9.5)
+            f.setBold(True)
+            p.setFont(f)
+            txt = f"{int(self._target * 100)}%"
+            tr = r.adjusted(0, 0, -12, 0)
+            split = r.left() + fw
+            p.setClipRect(QRectF(split, r.top(), r.right() - split + 1, r.height()))
+            p.setPen(QColor("#c9ccd3"))
+            p.drawText(tr, Qt.AlignRight | Qt.AlignVCenter, txt)
+            p.setClipRect(QRectF(r.left(), r.top(), fw, r.height()))
+            p.setPen(QColor("#16171a"))
+            p.drawText(tr, Qt.AlignRight | Qt.AlignVCenter, txt)
         p.end()
 
 
@@ -680,10 +696,10 @@ class SetupWizard(QDialog):
         g.addWidget(self.res, 1, 1)
         g.addWidget(label("After each recording"), 2, 0)
         self.after = QComboBox()
-        self.after.addItems(["Analyze it automatically (recommended)", "Let me click Analyze myself"])
-        self.after.setCurrentIndex(0 if main.cb_autoanalyze.isChecked() else 1)
-        self.after.setToolTip("Automatic: a report is ready a minute after you stop recording, with a Windows pop-up. "
-                              "Manual: go to the Analyzer tab and click “Analyze my last recording” when you want one.")
+        self.after.addItems(["Let me click Analyze myself", "Analyze it automatically"])
+        self.after.setCurrentIndex(1 if main.cb_autoanalyze.isChecked() else 0)
+        self.after.setToolTip("Manual: go to the Analyzer tab and click “Analyze my last recording” when you want a report. "
+                              "Automatic: a report is ready a few minutes after you stop recording, with a Windows pop-up.")
         g.addWidget(self.after, 2, 1)
         g.setColumnStretch(1, 1)
         l3.addLayout(g)
@@ -696,7 +712,7 @@ class SetupWizard(QDialog):
         for c in (self.sound, self.auto, self.check_now):
             l3.addWidget(c)
         l3.addWidget(label("Before each recording: click “Start watching”, then record in OBS like normal. "
-                           "After you stop recording, the report appears on the Analyzer tab (and on the Live tab), and opens in your browser when you click Open report.", "muted", True))
+                           "After you stop recording, go to the Analyzer tab and click Analyze my last recording (or choose automatic above). The report opens in your browser when you click Open report.", "muted", True))
         l3.addStretch(1)
         self.stack.addWidget(p3)
 
@@ -734,7 +750,7 @@ class SetupWizard(QDialog):
         m.res_combo.setCurrentIndex(self.res.currentIndex())
         m.cb_sound.setChecked(self.sound.isChecked())
         m.cb_autostart.setChecked(self.auto.isChecked())
-        m.cb_autoanalyze.setChecked(self.after.currentIndex() == 0)
+        m.cb_autoanalyze.setChecked(self.after.currentIndex() == 1)
         m._save_opts()
         self.completed = True
         if self.check_now.isChecked():
@@ -1029,7 +1045,7 @@ class Main(QMainWindow):
         self._toast_last = 0
         self.post_local(Advice("hello", "status", "before", "Ready",
                                "1) Click “Check OBS settings” to look for anything that would cause a problem.  2) Click “Start watching”, then play and record like normal.  "
-                               "3) When you stop recording, the file is checked and a report is posted here."))
+                               "3) When you stop recording, click Analyze on the Analyzer tab (or turn on automatic analysis in Settings) for a full report."))
         return w
 
     def _set_dot(self, color):
@@ -1470,13 +1486,13 @@ class Main(QMainWindow):
         if self.advisor:
             for a in self.advisor.drain():
                 self.post_local(a)
-            if self.advisor.want_analysis:
-                QTimer.singleShot(2500, self.refresh_latest)      # the recording just stopped: update the Analyzer card
-            if self.advisor.want_analysis and self.cb_autoanalyze.isChecked():
+            if self.advisor.want_analysis:                       # a recording just stopped
                 log_path, rec = self.advisor.want_analysis
                 self.advisor.want_analysis = None
                 self.last_video = rec
-                QTimer.singleShot(4000, lambda lp=log_path, r=rec: self.analyze_last(log_path=lp or None, video=r or None))
+                QTimer.singleShot(2500, self.refresh_latest)      # update the Analyzer card
+                if self.cb_autoanalyze.isChecked():               # only when the person turned automatic analysis on
+                    QTimer.singleShot(4000, lambda lp=log_path, r=rec: self.analyze_last(log_path=lp or None, video=r or None))
         # keep "Your latest recording" current while the Analyzer tab is on screen
         if self.isVisible() and self.tabs.currentIndex() == 1 and now - getattr(self, "_latest_t", 0) >= 10:
             self.refresh_latest()
@@ -1603,8 +1619,8 @@ class Main(QMainWindow):
         self.cb_autostart.setChecked(bool(self.settings.get("autostart")))
         self.cb_tray = QCheckBox("Keep running in the system tray when I close the window while watching")
         self.cb_tray.setChecked(self.settings.get("tray", True))
-        self.cb_autoanalyze = QCheckBox("Analyze each recording automatically when it stops (turn off to click Analyze yourself on the Analyzer tab)")
-        self.cb_autoanalyze.setChecked(self.settings.get("autoanalyze", True))
+        self.cb_autoanalyze = QCheckBox("Analyze each recording automatically when it stops (off: click “Analyze my last recording” on the Analyzer tab when you want a report)")
+        self.cb_autoanalyze.setChecked(bool(self.settings.get("auto_after", False)))   # off unless the person turns it on
         rrow = QHBoxLayout()
         rrow.addWidget(label("Resource use while watching"))
         self.res_combo = QComboBox()
@@ -1668,7 +1684,7 @@ class Main(QMainWindow):
         if not hasattr(self, "cb_autoanalyze"):
             return
         self.settings.update({"autostart": self.cb_autostart.isChecked(), "tray": self.cb_tray.isChecked(),
-                              "autoanalyze": self.cb_autoanalyze.isChecked(), "port": self.port.value(), "password": self.pw.text(),
+                              "auto_after": self.cb_autoanalyze.isChecked(), "port": self.port.value(), "password": self.pw.text(),
                               "toasts": self.toast_combo.currentIndex(), "sound": self.cb_sound.isChecked(),
                               "deep": self.cb_deep.isChecked() if hasattr(self, "cb_deep") else False,
                               "light": self.res_combo.currentIndex() if hasattr(self, "res_combo") else 0})
@@ -2691,6 +2707,23 @@ def install_crash_log():
 def main():
     if "--selftest" in sys.argv:
         selftest(sys.argv[sys.argv.index("--selftest") + 1])
+    app = QApplication(sys.argv)
+    app.setApplicationName(APP_NAME)
+    # Only one copy of the app: opening it again (or clicking a Windows pop-up) brings up the copy that's already running.
+    from PySide6.QtNetwork import QLocalServer, QLocalSocket
+    key = "LiveRecordingAnalyzer-" + re.sub(r"[^A-Za-z0-9_-]", "", os.environ.get("USERNAME") or os.environ.get("USER") or "user")
+    sock = QLocalSocket()
+    sock.connectToServer(key)
+    if sock.waitForConnected(800):
+        sock.write(("show" if "--minimized" not in sys.argv else "tray").encode())
+        sock.flush()
+        sock.waitForBytesWritten(800)
+        sock.disconnectFromServer()
+        return
+    QLocalServer.removeServer(key)       # left over if the app crashed
+    server = QLocalServer()
+    server.setSocketOptions(QLocalServer.UserAccessOption)
+    server.listen(key)
     crashed_last_time = os.path.exists(RUN_FLAG) and "--updated" not in sys.argv
     install_crash_log()
     try:
@@ -2705,11 +2738,24 @@ def main():
             pass
     # The window itself runs at normal priority so it stays responsive. The background work that could
     # compete with the game (the PC monitor thread and the analysis process) lowers its own priority.
-    app = QApplication(sys.argv)
-    app.setApplicationName(APP_NAME)
     apply_theme(app)
     app.setQuitOnLastWindowClosed(False)
     w = Main()
+
+    def _other_copy():
+        c = server.nextPendingConnection()
+        if not c:
+            return
+
+        def _read():
+            msg = bytes(c.readAll()).decode(errors="ignore")
+            if "show" in msg:
+                w._toast_clicked()
+            c.disconnectFromServer()
+        c.readyRead.connect(_read)
+        if c.bytesAvailable():
+            _read()
+    server.newConnection.connect(_other_copy)
     if crashed_last_time:
         w.post_local(Advice("crashed", "warning", "before", "The app closed unexpectedly last time",
                             "Sorry about that. Details were saved to a crash log. If it happens again, please attach this file when you report it — "
