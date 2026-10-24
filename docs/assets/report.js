@@ -174,6 +174,15 @@
     try { render(await decode(m[1])); }
     catch (e) { console.error(e); show("rp-error"); }
   }
+  // In-page links like #steps must scroll, not replace the #r= report data in the address.
+  document.addEventListener("click", (ev) => {
+    const a = ev.target.closest && ev.target.closest('a[href^="#"]');
+    if (!a || a.getAttribute("href").startsWith("#r=")) return;
+    const t = document.getElementById(a.getAttribute("href").slice(1));
+    if (!t) return;
+    ev.preventDefault();
+    t.scrollIntoView({ behavior: "smooth", block: "start" });
+  });
   window.addEventListener("hashchange", start);
   start();
 })();

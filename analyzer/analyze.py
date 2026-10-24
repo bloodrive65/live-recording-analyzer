@@ -275,7 +275,9 @@ def run(log_path: Optional[str], video_paths: dict | None = None, monitor_path: 
         st.begin("Read the OBS log", CHK_LOG)
         log = obslog.parse(log_path)
         span = f"; the log covers {log.first_ts:%b %d %I:%M %p} to {log.last_ts:%I:%M %p}" if log.first_ts and log.last_ts else ""
-        st.done(f"{os.path.basename(log_path)}: OBS {log.obs_version or 'version unknown'}, {len(log.recordings)} recording(s){span}.")
+        ver = (log.obs_version or "").strip()
+        ver = ver if ver.lower().startswith("obs") else (f"OBS {ver}" if ver else "OBS version unknown")
+        st.done(f"{os.path.basename(log_path)}: {ver}, {len(log.recordings)} recording(s){span}.")
     else:
         st.skip("Read the OBS log", CHK_LOG, "No OBS log was used (video file only), so OBS settings and skip counts weren't checked.")
 
