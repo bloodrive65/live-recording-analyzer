@@ -35,6 +35,12 @@ jobs:
           Get-ChildItem ffmpeg_tmp -Recurse -Filter LICENSE | Select-Object -First 1 | Copy-Item -Destination bin\FFMPEG-LICENSE.txt
           Get-ChildItem bin
 
+      - name: Run tests (the installer is only built when they pass)
+        shell: pwsh
+        run: |
+          $env:PATH = "$PWD\bin;$env:PATH"
+          python -m unittest discover -s tests -p "test_*.py" -v
+
       - name: Build app (PyInstaller)
         run: >
           pyinstaller --noconfirm --clean --windowed --onedir

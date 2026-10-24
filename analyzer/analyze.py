@@ -413,26 +413,32 @@ def run(log_path: Optional[str], video_paths: dict | None = None, monitor_path: 
         say("Checking Windows event log…", 0.7)
         st.begin("Check the Windows event log", CHK_WEV)
         n0 = len(incidents)
+        wev_err = ""
         try:
             t0 = min(r.output.start for _, r in recs) - timedelta(minutes=2)
             t1 = max((r.output.stop or r.output.start) for _, r in recs) + timedelta(minutes=2)
-            wev = winevents.query(t0, t1)
+            wev = winevents.query(t0, t1) or []
         except Exception as e:
-            notes.append(f"Could not read the Windows event log: {e}")
+            wev_err = str(e)[:200] or type(e).__name__
+            notes.append(f"Could not read the Windows event log: {wev_err}")
         for e in wev:
             if not e["meaning"] or "Update" in e["meaning"] or "Defender" in e["meaning"]:
                 continue
             for _, r in recs:
-                st = r.output.stop or r.output.start
-                if r.output.start - timedelta(seconds=30) <= e["ts"] <= st + timedelta(seconds=30):
+                rec_end = r.output.stop or r.output.start
+                if r.output.start - timedelta(seconds=30) <= e["ts"] <= rec_end + timedelta(seconds=30):
                     incidents.append(Incident(e["ts"], e["ts"], "winevent", f"Windows: {e['meaning']}",
                                               video_t=r.output.wall_to_video(e["ts"]),
                                               causes=[(f"{e['provider']} event {e['id']}: {e['message'][:160]}", "medium")],
                                               recording=r.label))
                     break
         k = len(incidents) - n0
-        st.done(f"{len(wev)} event(s) read; {k} happened during a recording and are on the timeline." if wev else "No relevant Windows events.",
-                "found" if k else "ok")
+        if wev_err:
+            st.done(f"Couldn't read the Windows event log ({wev_err}), so driver resets, disk errors and crashes during "
+                    "the recording are unknown. The rest of the report is still complete.", "failed")
+        else:
+            st.done(f"{len(wev)} event(s) read; {k} happened during a recording and are on the timeline." if wev else "No relevant Windows events.",
+                    "found" if k else "ok")
 
     # ---- monitor-only session (no OBS log)
     if not recs and samples:
@@ -774,9 +780,17 @@ def _recording_findings(log, r: RecordingResult, F: list):
                 f"{len(v.gaps)} timestamp gap(s) in the file — {v.gap_frames_total:,} missing frames",
                 "Moments where the next frame comes later than it should; see the timeline for each one.",
                 "These are visible stutters/skips in the video.", " ".join(steps), loc)
-        elif v.frame_count:
+        elif v.frame_count and v.ts_complete:
             add("good", "File", "No missing frames found in the file",
                 f"{v.frame_count:,} frames checked; every timestamp is where it should be.")
+        if not v.ts_complete:
+            add("warning", "File", "Only part of the file could be checked for missing frames",
+                v.ts_note + (f" Missing-frame results cover the first {video_probe.fmt_len(v.ts_checked_s)} only." if v.ts_checked_s else ""),
+                "Problems in the unread part can't be found, and a file that ends early may not play to the end.",
+                "Check that the recording drive is connected and the file opens in a player. If OBS crashed or the drive "
+                "disconnected while recording, open OBS → File → Remux Recordings on the file (MKV) to recover what was saved, "
+                "then analyze the remuxed copy.",
+                [["File", os.path.basename(v.path)], ["Checked", f"{video_probe.fmt_len(v.ts_checked_s)} of {video_probe.fmt_len(v.duration)}"]])
         if v.backwards_ts:
             add("warning", "File", f"{v.backwards_ts} timestamp(s) go backwards", "Some frames are stamped earlier than the frame before them.",
                 "Can cause playback/editing glitches.", "Remux the file in OBS: File → Remux Recordings, pick this file, click Remux.")
@@ -801,6 +815,12 @@ def _recording_findings(log, r: RecordingResult, F: list):
                  "Check that OBS → Settings → Audio → Sample Rate matches your audio devices (48 kHz is standard). If the drift grows over long recordings, "
                  "open Edit → Advanced Audio Properties and check the Sync Offset of each source."),
                 [["Audio sources", ", ".join(f"“{x}”" for x in list(dict.fromkeys(getattr(log, "audio_buffering_sources", []) or []))[:3]) or "see OBS → Edit → Advanced Audio Properties"]])
+        if v.deep_note:
+            add("info", "File", "The deep scan didn't finish",
+                v.deep_note + " Repeated and frozen frames weren't checked, so the report makes no claim about them.",
+                "The other checks are unaffected.",
+                "If it was cancelled, analyze again with Deep scan ticked. If ffmpeg stopped with an error, the file may be damaged "
+                "or cut off; see the other File findings.")
         if v.deep_scanned:
             if v.dup_periodic_s:
                 add("warning", "Frame rate", f"Regular repeated frame every ~{v.dup_periodic_s} s",
