@@ -17,11 +17,20 @@
 <button class="menu-btn" aria-label="Menu" aria-expanded="false" aria-controls="nav">&#9776;</button>
 <nav class="nav" id="nav" aria-label="Main"><a href="index.html">Home</a><a href="getting-started.html">Getting started</a><a href="using-the-app.html">Using the app</a><a href="problems-explained.html">Problems explained</a><a href="faq.html">FAQ & fixes</a><a href="releases.html" aria-current=page>Releases</a></nav>
 </div></header>
-<main id="main"><div class="wrap page"><aside class="toc" aria-label="On this page"><b>ON THIS PAGE</b><a href="#v144">1.4.4</a><a href="#v143">1.4.3</a><a href="#v142">1.4.2</a><a href="#v141">1.4.1</a><a href="#v140">1.4.0</a><a href="#v132">1.3.2</a><a href="#v131">1.3.1</a><a href="#v130">1.3.0</a><a href="#v121">1.2.1</a><a href="#v120">1.2.0</a><a href="#v110">1.1.0</a><a href="#which">Which file?</a></aside><article class="doc">
+<main id="main"><div class="wrap page"><aside class="toc" aria-label="On this page"><b>ON THIS PAGE</b><a href="#v145">1.4.5</a><a href="#v144">1.4.4</a><a href="#v143">1.4.3</a><a href="#v142">1.4.2</a><a href="#v141">1.4.1</a><a href="#v140">1.4.0</a><a href="#v132">1.3.2</a><a href="#v131">1.3.1</a><a href="#v130">1.3.0</a><a href="#v121">1.2.1</a><a href="#v120">1.2.0</a><a href="#v110">1.1.0</a><a href="#which">Which file?</a></aside><article class="doc">
 <h1>Releases</h1>
 <p class="intro">Always get the newest version from <a href="https://github.com/bloodrive65/live-recording-analyzer/releases/latest">the latest release on GitHub</a>. Installers are built automatically from the public source code.</p>
 
-<div class="rel" id="v144"><header><h2>1.4.4</h2><span class="pill" style="color:var(--ok)">LATEST</span><span class="date">October 2026</span></header>
+<div class="rel" id="v145"><header><h2>1.4.5</h2><span class="pill" style="color:var(--ok)">LATEST</span><span class="date">October 2026</span></header>
+<ul>
+<li><b>Fixed:</b> the analysis could crash when Windows logged a driver reset, disk or USB error, or app crash during the recording. Those events now appear on the timeline.</li>
+<li><b>Fixed:</b> the deep scan and the frame-by-frame check no longer report "all clear" when they didn't finish. The step is marked <b>Couldn't finish</b> with the reason, and a cut-off file says how much of it was checked.</li>
+<li><b>Fixed:</b> "No relevant Windows events" no longer appears when the event log couldn't be read.</li>
+<li>Automatic tests for each of these now run on Windows and Linux for every change, and the installer is only built when they pass.</li>
+</ul>
+<div class="dl"><a class="btn primary" href="https://github.com/bloodrive65/live-recording-analyzer/releases/tag/v1.4.5">Download 1.4.5</a></div></div>
+
+<div class="rel" id="v144"><header><h2>1.4.4</h2><span class="date">October 2026</span></header>
 <ul>
 <li><b>Analyzer tab in four sections:</b> Analyze your last recording, Analyze a recording from an OBS log, Analyze a different video, and Last report.</li>
 <li><b>New: Analyze a different video.</b> Browse to any video. If it's listed in one of your OBS logs, it gets the same full analysis as your last recording; otherwise the file is checked by itself. It tells you which before you start.</li>

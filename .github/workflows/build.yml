@@ -67,7 +67,7 @@ jobs:
         run: |
           $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
           if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress; }
-          $ver = "1.4.4"
+          $ver = "1.4.5"
           if ("${{ github.ref_type }}" -eq "tag") { $ver = "${{ github.ref_name }}".TrimStart("v") }
           & $iscc "/DAppVersion=$ver" packaging\installer.iss
           Compress-Archive -Path "dist\Live Recording Analyzer\*" -DestinationPath "dist\Live-Recording-Analyzer-Portable-$ver.zip"
