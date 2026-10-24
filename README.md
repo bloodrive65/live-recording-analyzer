@@ -17,8 +17,8 @@ A Windows desktop app that watches OBS Studio while you record and explains, in 
 
 </div>
 
-Website, guides and FAQ: https://bloodrive65.github.io/live-recording-analyzer/
-Downloads: https://github.com/bloodrive65/live-recording-analyzer/releases/latest
+- Website, guides and FAQ: https://bloodrive65.github.io/live-recording-analyzer/
+- Downloads: https://github.com/bloodrive65/live-recording-analyzer/releases/latest
 
 ![Analyzer tab](.github/images/analyzer.png)
 
